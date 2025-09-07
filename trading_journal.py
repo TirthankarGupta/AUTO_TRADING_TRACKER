@@ -294,3 +294,57 @@ if not closed.empty:
     st.download_button("Download daily summary CSV", data=csv_buffer2.getvalue().encode("utf-8"), file_name="trading_journal_daily_summary.csv", mime="text/csv")
 
 st.caption("Notes: Entry/Exit times shown in Asia/Kolkata. Edit Notes in the ledger and click 'Apply edits to ledger' to update (in-memory), then use Download to export.")
+
+import os
+from datetime import datetime
+import pandas as pd
+
+# =============== Export Utils ===============
+EXPORT_DIR = "exports"
+
+def ensure_export_dir():
+    """Make sure the export folder exists."""
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+
+def filename_with_timestamp(prefix: str, ext: str) -> str:
+    """Generate a filename with a timestamp."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_prefix = prefix.replace(" ", "_")
+    return os.path.join(EXPORT_DIR, f"{safe_prefix}_{ts}.{ext}")
+
+def dual_export(df: pd.DataFrame, prefix: str = "trading_journal") -> dict:
+    """
+    Export DataFrame to both CSV and Excel.
+    Returns file paths in a dict.
+    """
+    ensure_export_dir()
+    csv_path = filename_with_timestamp(prefix, "csv")
+    xlsx_path = filename_with_timestamp(prefix, "xlsx")
+    df.to_csv(csv_path, index=False)
+    df.to_excel(xlsx_path, index=False, engine="openpyxl")
+    return {"csv": csv_path, "excel": xlsx_path}
+# =============== Quick Test ===============
+if __name__ == "__main__":
+    # Make a small sample DataFrame
+    data = [
+        {"date": "2025-09-07", "symbol": "NIFTY23SEP", "quantity": 1, "entry_price": 24724, "exit_price": 24780, "pnl": 56},
+        {"date": "2025-09-07", "symbol": "NIFTY23SEP", "quantity": 1, "entry_price": 24780, "exit_price": 24750, "pnl": -30},
+    ]
+    df = pd.DataFrame(data)
+
+    results = dual_export(df, prefix="test_export")
+    print("Export complete!")
+    print(results)
+# =============== Quick Test ===============
+if __name__ == "__main__":
+    # Make a small sample DataFrame
+    data = [
+        {"date": "2025-09-07", "symbol": "NIFTY23SEP", "quantity": 1, "entry_price": 24724, "exit_price": 24780, "pnl": 56},
+        {"date": "2025-09-07", "symbol": "NIFTY23SEP", "quantity": 1, "entry_price": 24780, "exit_price": 24750, "pnl": -30},
+    ]
+    df = pd.DataFrame(data)
+
+    results = dual_export(df, prefix="test_export")
+    print("Export complete!")
+    print(results)
+ (Initial commit: add trading_journal.py with dual export utilities)
