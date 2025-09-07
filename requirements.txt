@@ -6,3 +6,4 @@ seaborn
 pandas_ta
 smartapi-python
 notebook
+jupyterlab
