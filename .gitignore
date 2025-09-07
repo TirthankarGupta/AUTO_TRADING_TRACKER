@@ -27,3 +27,18 @@ Thumbs.db
 .idea/
 
 exports/
+
+# Python cache & temp files
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local dev config
+*.log
