@@ -1,0 +1,8 @@
+﻿pandas
+numpy
+streamlit
+matplotlib
+seaborn
+pandas_ta
+smartapi-python
+notebook
