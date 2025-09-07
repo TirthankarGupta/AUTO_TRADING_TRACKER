@@ -1,32 +1,31 @@
 ﻿# QUICK_COMMANDS
 
-# from project root
+# From project root (C:\Users\TIRTHANKAR\Documents\AUTO_TRADING_TRACKER)
 
-# Activate venv
+# Activate virtual environment
 .\.venv\Scripts\Activate.ps1
 
-# Install deps
+# Install dependencies
 pip install -r requirements.txt
 
-# Run unit/smoke test (local)
+# Run smoke test (local)
 python trading_journal.py
 
 # Run Streamlit UI
 streamlit run trading_journal.py
 
-# Git common flow
+# Git: common quick flow
 git status
 git add .
-git commit -m "msg"
+git commit -m "Short message"
 git pull --rebase origin main
 git push -u origin main
 
-# Update .gitignore and untrack previously tracked exports:
-# (only if you change .gitignore to add new entries)
+# Untrack previously committed exports after updating .gitignore:
 git rm -r --cached exports
 git add .gitignore
 git commit -m "Ignore exports folder"
 git push
 
-# If you need to abort an in-progress rebase:
+# Abort rebase if needed:
 git rebase --abort
