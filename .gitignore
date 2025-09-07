@@ -25,3 +25,5 @@ venv/
 Thumbs.db
 .vscode/
 .idea/
+
+exports/
