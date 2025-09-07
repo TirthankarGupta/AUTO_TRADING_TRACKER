@@ -1,0 +1,27 @@
+﻿# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Backup files
+*.bak
+*backup*
+
+# Environment & secrets
+.env
+.env.*
+
+# Data files
+*.xlsx
+*.csv
+*.parquet
+
+# Virtual environments
+venv/
+.env/
+
+# OS / IDE junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
