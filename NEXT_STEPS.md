@@ -1,9 +1,11 @@
 ﻿# NEXT_STEPS (short-term)
 
 CURRENT_TASK:
-- Add Streamlit export button into trading_journal.py (already done? verify)
-- Replace sample dataframe with real journal load (CSV or other source)
-- Add "Export filtered by date" UI
+✅ Add Streamlit export button into trading_journal.py  
+➡️ Next: Replace sample dataframe with actual trading journal data (from CSV or database)  
+➡️ Future: Add "Export filtered by date" UI  
+
+---
 
 When you return, follow this order:
 
@@ -18,10 +20,12 @@ When you return, follow this order:
    streamlit run trading_journal.py
    # Open http://localhost:8501
 
-4. Work on tasks in CURRENT_TASK. After each small change:
+4. Work on CURRENT_TASK. After each small change:
    git add .
    git commit -m "Concise message about change"
    git push
+
+---
 
 If git shows conflicts when pushing:
 - Run: git pull --rebase origin main
@@ -30,10 +34,14 @@ If git shows conflicts when pushing:
 - git rebase --continue
 - git push
 
+---
+
 Where key files live:
 - trading_journal.py — main script (Streamlit UI + export)
 - requirements.txt — dependencies
 - exports/ — local export files (ignored by git)
 - .gitignore — ignored files
 
-If interrupted, update this file's CURRENT_TASK with the next tiny step to resume quickly.
+---
+
+⏸ If interrupted, update this file's CURRENT_TASK with the next tiny step to resume quickly.
