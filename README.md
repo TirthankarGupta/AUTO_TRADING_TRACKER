@@ -1,13 +1,14 @@
-# 🔴 CURRENT_TASK  
+﻿# ðŸ”´ CURRENT_TASK  
+**Last Progress Log:** _
 **Add Streamlit export button into trading_journal.py**  
-➡️ Next: Replace sample dataframe with real trading journal data  
-➡️ Future: Add "Export filtered by date" UI  
+âž¡ï¸ Next: Replace sample dataframe with real trading journal data  
+âž¡ï¸ Future: Add "Export filtered by date" UI  
 
 ---
-﻿# 🔴 CURRENT_TASK  
+ï»¿# ðŸ”´ CURRENT_TASK  
 **Add Streamlit export button into `trading_journal.py`**  
-➡️ Next: Replace sample dataframe with real trading journal data  
-➡️ Future: Add "Export filtered by date" UI  
+âž¡ï¸ Next: Replace sample dataframe with real trading journal data  
+âž¡ï¸ Future: Add "Export filtered by date" UI  
 
 ---
 
@@ -16,32 +17,32 @@
 A Python-based **Trading Journal \& Dashboard** built for active traders.
 Designed to track **options trades**, record every entry and exit, calculate **PnL**, and provide insights into performance over time.
 
-Trading without journaling is like driving without a dashboard – this tool helps you stay disciplined, learn from mistakes, and grow consistently.
+Trading without journaling is like driving without a dashboard â€“ this tool helps you stay disciplined, learn from mistakes, and grow consistently.
 
-## 🚀 Features
+## ðŸš€ Features
 
-* 📊 **Trade Journal**: Record **entry/exit times, symbol, strike, quantity, and prices**.
-* ✅ **PnL Tracking**: Auto-calculates **per-trade profit/loss** and **cumulative balance**.
-* ⏱️ **Time Tracking**: Capture **exact timestamps** of trade entry and exit.
-* 🗂️ **Backup Support**: Keeps backup copies of trading logs.
-* 🔔 **Signals (Coming Soon)**: Real-time buy/sell signals \& alerts integrated with broker feed.
-* 📊 **Dashboard (Planned)**: Interactive Streamlit dashboard with trade charts, win/loss ratios, and equity curve.
+* ðŸ“Š **Trade Journal**: Record **entry/exit times, symbol, strike, quantity, and prices**.
+* âœ… **PnL Tracking**: Auto-calculates **per-trade profit/loss** and **cumulative balance**.
+* â±ï¸ **Time Tracking**: Capture **exact timestamps** of trade entry and exit.
+* ðŸ—‚ï¸ **Backup Support**: Keeps backup copies of trading logs.
+* ðŸ”” **Signals (Coming Soon)**: Real-time buy/sell signals \& alerts integrated with broker feed.
+* ðŸ“Š **Dashboard (Planned)**: Interactive Streamlit dashboard with trade charts, win/loss ratios, and equity curve.
 
-## 📂 Project Structure
+## ðŸ“‚ Project Structure
 
 \\\\ash
 AUTO\_TRADING\_TRACKER/
-│-- trading\_journal.py     # Core trading journal script
-│-- requirements.txt       # Dependencies
-│-- README.md              # Project documentation
-│-- .gitignore             # Git ignore rules
+â”‚-- trading\_journal.py     # Core trading journal script
+â”‚-- requirements.txt       # Dependencies
+â”‚-- README.md              # Project documentation
+â”‚-- .gitignore             # Git ignore rules
 \\"
 type README.md
 Add-Content README.md @
 
 
 
-\## 📂 Project Structure
+\## ðŸ“‚ Project Structure
 
 
 
@@ -49,29 +50,29 @@ Add-Content README.md @
 
 AUTO\_TRADING\_TRACKER/
 
-│-- trading\_journal.py     # Core trading journal script
+â”‚-- trading\_journal.py     # Core trading journal script
 
-│-- requirements.txt       # Dependencies
+â”‚-- requirements.txt       # Dependencies
 
-│-- README.md              # Project documentation
+â”‚-- README.md              # Project documentation
 
-│-- .gitignore             # Git ignore rules
+â”‚-- .gitignore             # Git ignore rules
 
 
-## 📊 Example Trade Log
+## ðŸ“Š Example Trade Log
 
-Here’s what a trade entry might look like:
+Hereâ€™s what a trade entry might look like:
 
 | Date       | Symbol | Type | Entry Time | Entry Price | Exit Time | Exit Price | Qty | PnL   | Cumulative Balance |
 |------------|--------|------|------------|-------------|-----------|------------|-----|-------|---------------------|
-| 2025-09-07 | NIFTY  | CE   | 09:21 AM   | 152.50      | 09:47 AM  | 178.20     | 75  | ₹1,927 | ₹1,927              |
-| 2025-09-07 | SENSEX | PE   | 11:05 AM   | 246.00      | 11:22 AM  | 219.80     | 75  | -₹1,965 | -₹38               |
+| 2025-09-07 | NIFTY  | CE   | 09:21 AM   | 152.50      | 09:47 AM  | 178.20     | 75  | â‚¹1,927 | â‚¹1,927              |
+| 2025-09-07 | SENSEX | PE   | 11:05 AM   | 246.00      | 11:22 AM  | 219.80     | 75  | -â‚¹1,965 | -â‚¹38               |
 
-✅ Tracks **lot sizes**  
-✅ Auto-calculates **PnL per trade**  
-✅ Maintains **cumulative balance**
+âœ… Tracks **lot sizes**  
+âœ… Auto-calculates **PnL per trade**  
+âœ… Maintains **cumulative balance**
 
-## ⚙️ Installation & Setup
+## âš™ï¸ Installation & Setup
 
 1. Clone the repository:
    ```bash
@@ -94,32 +95,32 @@ Here’s what a trade entry might look like:
 
 ---
 
-## 📝 Notes
+## ðŸ“ Notes
 - This tool is intended for **personal trading journals** and backtesting.
 - Works best when updated **daily** after trading sessions.
 - Future versions will include:
-  - 📊 Streamlit dashboard for live visualization
-  - 🔔 Real-time broker-integrated signals
-  - 📂 Automated backups & export to Excel/CSV
+  - ðŸ“Š Streamlit dashboard for live visualization
+  - ðŸ”” Real-time broker-integrated signals
+  - ðŸ“‚ Automated backups & export to Excel/CSV
 
 ---
 
-## 🤝 Contributing
-Pull requests are welcome! For major changes, please open an issue first to discuss what you’d like to improve.
+## ðŸ¤ Contributing
+Pull requests are welcome! For major changes, please open an issue first to discuss what youâ€™d like to improve.
 
 ---
 
-## 📄 License
+## ðŸ“„ License
 This project is licensed under the MIT License.
 
 ---
 
-## 🛠 Developer Guide
+## ðŸ›  Developer Guide
 
 For contributors (or when resuming after a break), see:
 
-- [DEV_SETUP.md](DEV_SETUP.md) → How to set up Python environment, install dependencies, and run the project  
-- [NEXT_STEPS.md](NEXT_STEPS.md) → The exact next tasks to continue development (kept updated)  
-- [QUICK_COMMANDS.md](QUICK_COMMANDS.md) → Common Git, Streamlit, and Python commands for quick reference  
+- [DEV_SETUP.md](DEV_SETUP.md) â†’ How to set up Python environment, install dependencies, and run the project  
+- [NEXT_STEPS.md](NEXT_STEPS.md) â†’ The exact next tasks to continue development (kept updated)  
+- [QUICK_COMMANDS.md](QUICK_COMMANDS.md) â†’ Common Git, Streamlit, and Python commands for quick reference  
 
 These docs are kept in the repo to make onboarding and resuming work fast and easy.
