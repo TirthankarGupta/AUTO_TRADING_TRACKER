@@ -1,4 +1,4 @@
-# trading_dashboard.py
+﻿# trading_dashboard.py
 # Workable Streamlit dashboard: candlestick chart + extended persistent journal
 
 import streamlit as st
@@ -7,11 +7,11 @@ from pathlib import Path
 from datetime import datetime
 import plotly.graph_objects as go
 import io
-
+# Dashboard title and quick debug
+st.title("AUTO TRADING TRACKER")
+st.markdown("<b>HTML RENDER TEST – should be bold</b>", unsafe_allow_html=True)
 # --- SAFEGUARD: ensure trades dataframe exists and restore paths ---
 import os
-import pandas as pd
-from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.resolve()
 journal_path = BASE_DIR / "journal.csv"
@@ -245,7 +245,7 @@ with st.sidebar:
     st.markdown("---")
 
     if st.button("Run backtest (placeholder)"):
-        st.info("Backtest: placeholder - we'll add the runner later.")
+        st.info("Backtest: placeholder  we'll add the runner later.")
 
     st.markdown("### Trade actions")
 
