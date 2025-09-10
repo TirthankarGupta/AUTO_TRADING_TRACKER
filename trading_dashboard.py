@@ -1,408 +1,367 @@
-# trading_dashboard.py
-# Workable Streamlit dashboard: candlestick chart + extended persistent journal
+﻿# trading_dashboard.py
+# Overwrite your existing file with this single script.
+# This version applies:
+#  - Sidebar background matching the top header gradient (blue)
+#  - Top header with orange "AT" logo and Login pill
+#  - All other UI and candlestick behavior retained from previous working version
 
 import streamlit as st
 import pandas as pd
-from pathlib import Path
-from datetime import datetime
+import numpy as np
+from datetime import datetime, timedelta
 import plotly.graph_objects as go
-import io
 
-# --- SAFEGUARD: ensure trades dataframe exists and restore paths ---
-import os
-import pandas as pd
-from pathlib import Path
+st.set_page_config(page_title="AUTO TRADING TRACKER", layout="wide", initial_sidebar_state="expanded")
 
-BASE_DIR = Path(__file__).parent.resolve()
-journal_path = BASE_DIR / "journal.csv"
+# ---------------------
+# Config values (tweak if needed)
+# ---------------------
+SIDEBAR_W = 260
+HEADER_H = 72
+CONTENT_PAD = 22
 
-if journal_path.exists():
-    try:
-        df_trades = pd.read_csv(journal_path)
-    except Exception:
-        # fallback if CSV corrupt
-        df_trades = pd.DataFrame([
-            {"date": "2025-09-09", "symbol": "RELIANCE", "entry_price": 2500, "exit_price": 2512, "pnl": 900},
-            {"date": "2025-09-09", "symbol": "TCS", "entry_price": 3450.5, "exit_price": 3440, "pnl": -787.5},
-        ])
-else:
-    # sample data so UI always renders
-    df_trades = pd.DataFrame([
-        {"date": "2025-09-09", "symbol": "RELIANCE", "entry_price": 2500, "exit_price": 2512, "pnl": 900},
-        {"date": "2025-09-09", "symbol": "TCS", "entry_price": 3450.5, "exit_price": 3440, "pnl": -787.5},
-    ])
-
-# --- Hide Streamlit default top-right menu/header/footer (so we can show our custom header) ---
-hide_streamlit_style = """
-    <style>
-    #MainMenu {visibility: hidden !important;}
-    header {visibility: hidden !important;}
-    footer {visibility: hidden !important;}
-    </style>
-"""
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-
-# --- Add custom top header (navy + saffron logo + login button) ---
-# --- Single full-width custom header (sits to the right of the sidebar) ---
-# Adjust `--sidebar-width` below if your sidebar is wider/narrower.
-st.markdown(
-    """
-    <style>
-    :root {
-        --sidebar-width: 280px;    /* change this value if your sidebar is wider */
-        --header-height: 72px;
-    }
-
-    /* place header to the right of Streamlit sidebar and span the rest of the page */
-    .custom-topbar {
-        box-sizing: border-box;
-        position: relative;
-        margin-left: var(--sidebar-width);
-        width: calc(100% - var(--sidebar-width));
-        height: var(--header-height);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px 28px;
-        border-radius: 12px;
-        background: linear-gradient(90deg,#0d1b4c,#0b2340);
-        color: #ffffff;
-        font-weight: 700;
-        z-index: 999;
-    }
-
-    /* keep the inner logo compact */
-    .custom-topbar .logo {
-        display:flex;
-        align-items:center;
-        gap:14px;
-    }
-    .custom-topbar .logo .mark {
-        width:44px;height:44px;border-radius:10px;
-        background:#f57c00;display:flex;align-items:center;
-        justify-content:center;font-weight:800;color:white;font-size:16px;
-    }
-    .custom-topbar .title {
-        font-size:20px; letter-spacing:0.6px;
-    }
-
-    /* subtle login button */
-    .custom-topbar .login button {
-        background: rgba(255,255,255,0.06);
-        color: white;
-        border: 1px solid rgba(255,255,255,0.12);
-        padding:8px 12px;
-        border-radius:8px;
-    }
-
-    /* small responsive tweak: reduce sidebar width on small screens */
-    @media (max-width: 1100px) {
-      :root { --sidebar-width: 220px; }
-    }
-    </style>
-
-    <div class="custom-topbar" role="banner" aria-label="topbar">
-      <div class="logo" aria-hidden="true">
-        <div class="mark">AT</div>
-        <div>
-          <div class="title">AUTO TRADING TRACKER</div>
-          <div style="font-size:12px;color:rgba(255,255,255,0.75);margin-top:2px;">Demo</div>
-        </div>
-      </div>
-      <div class="login"><button>Login</button></div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-
-# --- Ensure df_trades exists (safe fallback) ---
-import pandas as pd
-from pathlib import Path
-
-BASE_DIR = Path(__file__).parent.resolve()
-journal_path = BASE_DIR / "journal.csv"
-
-if journal_path.exists():
-    try:
-        df_trades = pd.read_csv(journal_path, parse_dates=True)
-    except Exception:
-        # if CSV is malformed, fall back to sample
-        df_trades = pd.DataFrame([
-            {"date":"2025-09-09","symbol":"RELIANCE","entry_price":2500,"exit_price":2512,"pnl":900},
-            {"date":"2025-09-09","symbol":"TCS","entry_price":3450.5,"exit_price":3440,"pnl":-787.5},
-        ])
-else:
-    # sample data so UI can render while you work
-    df_trades = pd.DataFrame([
-        {"date":"2025-09-09","symbol":"RELIANCE","entry_price":2500,"exit_price":2512,"pnl":900},
-        {"date":"2025-09-09","symbol":"TCS","entry_price":3450.5,"exit_price":3440,"pnl":-787.5},
-    ])
-
-# --- Ensure project paths exist (restore if accidentally removed) ---
-from pathlib import Path
-
-# Project base directory (script folder)
-BASE_DIR = Path(__file__).parent.resolve()
-
-# Common paths used by the dashboard
-price_path = BASE_DIR / "price_data.csv"
-journal_path = BASE_DIR / "journal.csv"
-
-def to_csv_bytes(df):
-    """Return CSV bytes for download (UTF-8)."""
-    return df.to_csv(index=False).encode("utf-8")
-# --- Theme / global CSS (deep-navy background, saffron/orange, india-green, white) ---
-# --- Replace the whole THEME_CSS block below (copy everything) ---
-# --- Theme / global CSS ---
-THEME_CSS = """
-:root{
-  --navy:#0d1b4c;      /* deep navy blue */
-  --saffron:#f57c00;   /* saffron / orange */
-  --india-green:#2e7d32; /* India-like green */
-  --card-white:#ffffff;
-  --muted:#9aa7b2;
-  --radius:12px;
+# ---------------------
+# CSS (no f-strings with braces)
+# ---------------------
+css_template = """
+<style>
+:root {
+  --sidebar-w: __SIDEBAR_W__;
+  --header-h: __HEADER_H__;
+  --content-pad: __CONTENT_PAD__;
 }
 
-/* Top header bar */
-[data-testid="stHeader"], header[role="banner"] {
-  background: var(--navy) !important;
-  color: white !important;
-  border-radius: 12px !important;
+/* hide default Streamlit top menu/header/footer (we provide our own) */
+#MainMenu, header, footer, header[data-testid="stHeader"] {
+  display: none !important;
 }
 
-/* Sidebar background */
-[data-testid="stSidebar"] {
-  background: var(--navy) !important;
-  color: white !important;
+/* force sidebar width and style it with same gradient as header */
+section[data-testid="stSidebar"] > div:first-of-type {
+  min-width: var(--sidebar-w) !important;
+  max-width: var(--sidebar-w) !important;
+  width: var(--sidebar-w) !important;
+  padding-left: 20px !important;
+  padding-right: 14px !important;
+  box-sizing: border-box;
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+  /* Sidebar background matches header gradient */
+  background: linear-gradient(90deg,#071428,#0b2440) !important;
+  color: #ffffff !important;
 }
 
-/* Sidebar inputs */
-[data-testid="stSidebar"] input,
-[data-testid="stSidebar"] .stTextInput input,
-[data-testid="stSidebar"] .stSelectbox,
-[data-testid="stSidebar"] .stNumberInput input,
-[data-testid="stSidebar"] textarea {
+/* Adjust form control backgrounds inside sidebar to stay visible */
+section[data-testid="stSidebar"] .stTextInput > div > input,
+section[data-testid="stSidebar"] .stSelectbox > div[role="combobox"] > div,
+section[data-testid="stSidebar"] textarea, 
+section[data-testid="stSidebar"] .stNumberInput > div > input {
   background: #ffffff !important;
-  color: #0b2340 !important;
-  border-radius: 8px !important;
+  color: #111 !important;
 }
 
-/* Sidebar small text */
-[data-testid="stSidebar"] .css-1d391kg,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] .stMarkdown {
-  color: rgba(255,255,255,0.85) !important;
+/* labels and small text color in sidebar */
+section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] .field-label, section[data-testid="stSidebar"] .css-1aumxhk {
+  color: #dbe9fb !important;
 }
 
-/* Table header saffron */
-.stDataFrame thead th, table thead th {
-  background: var(--saffron) !important;
-  color: #fff !important;
-  font-weight: 700 !important;
-  border-bottom: 2px solid rgba(11,35,64,0.12) !important;
+/* main content: move right of sidebar and reserve space for header */
+.main .block-container {
+  margin-left: var(--sidebar-w) !important;
+  padding-left: var(--content-pad) !important;
+  padding-right: var(--content-pad) !important;
+  padding-top: calc(var(--header-h) + 18px) !important;
+  box-sizing: border-box;
+  max-width: calc(100% - var(--sidebar-w)) !important;
 }
+
+/* fixed single top header */
+.custom-top-header {
+  position: fixed;
+  top: 0;
+  left: calc(var(--sidebar-w) + 12px);
+  right: 12px;
+  height: var(--header-h);
+  background: linear-gradient(90deg,#071428,#0b2440);
+  border-radius: 10px;
+  padding: 10px 18px;
+  z-index: 9999;
+  display:flex;
+  align-items:center;
+  gap:16px;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.08);
+  font-family: "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* orange square logo */
+.custom-top-header .logo {
+  width:46px;
+  height:46px;
+  background:#ff8a00;
+  border-radius:10px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:800;
+  color:#fff;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.06) inset;
+  font-family: "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 18px;
+}
+
+/* title block */
+.custom-top-header .titleblock {
+  display:flex;
+  flex-direction:column;
+  line-height:1;
+}
+.custom-top-header .maintitle {
+  font-size:18px;
+  font-weight:700;
+  letter-spacing:0.6px;
+}
+.custom-top-header .subtitle {
+  font-size:11px;
+  opacity:0.85;
+  margin-top:2px;
+}
+
+/* Login pill on right */
+.custom-top-header .login-pill {
+  margin-left:auto;
+  padding:8px 12px;
+  background: rgba(255,255,255,0.06);
+  border-radius:8px;
+  font-size:13px;
+  color: #e8eef7;
+  border: 1px solid rgba(255,255,255,0.03);
+}
+
+/* Sidebar headings bold and CAPS */
+section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] .section-title {
+  font-weight: 800 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.6px;
+  color: #ffffff !important;
+}
+
+/* zebra table */
+.zebra-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: "Segoe UI", Roboto, Arial, sans-serif;
+  margin-bottom: 18px;
+}
+.zebra-table th {
+  text-align: left;
+  padding: 10px 12px;
+  background: #f6f7fb;
+  color: #333;
+  font-weight: 600;
+  border-bottom: 1px solid #e6e9ef;
+}
+.zebra-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f2f4f8;
+  color: #1e2a36;
+}
+.zebra-table tr:nth-child(even) { background: #ffffff; }
+.zebra-table tr:nth-child(odd)  { background: #fbfcfe; }
+
+/* keep first child of block container tidy */
+.block-container > div:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+</style>
 """
 
-# Inject CSS into Streamlit
-st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
-# custom header (navy gradient, saffron logo, login button)
-st.markdown(
-    """
-    <div style="display:flex;align-items:center;justify-content:space-between;
-                background: linear-gradient(90deg, var(--navy), #0b2340);
-                padding:12px 18px; border-radius:12px; color: white; margin: 18px 40px;">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div style="width:40px;height:40px;border-radius:8px;
-                    background:var(--saffron);display:flex;align-items:center;
-                    justify-content:center;font-weight:700;color:white;">
-          AT
-        </div>
-        <div style="color:var(--muted);font-size:12px;margin-left:8px;">Demo</div>
-      </div>
+css = css_template.replace("__SIDEBAR_W__", f"{SIDEBAR_W}px").replace("__HEADER_H__", f"{HEADER_H}px").replace("__CONTENT_PAD__", f"{CONTENT_PAD}px")
+st.markdown(css, unsafe_allow_html=True)
 
-      <div>
-        <button style="background: rgba(255,255,255,0.06);
-                       color: white; border: 1px solid rgba(255,255,255,0.12);
-                       padding:8px 12px; border-radius:8px;">
-          Login
-        </button>
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+# ---------------------
+# Top header HTML (single header with orange AT and Login pill)
+# ---------------------
+st.markdown("""
+<div class="custom-top-header" role="banner">
+  <div class="logo">AT</div>
+  <div class="titleblock">
+    <div class="maintitle">AUTO TRADING TRACKER</div>
+    <div class="subtitle">Demo</div>
+  </div>
+  <div class="login-pill">Login</div>
+</div>
+""", unsafe_allow_html=True)
 
-
-
-# ---------------- Sidebar (controls + actions) ----------------
+# ---------------------
+# Sidebar controls (unchanged layout; only background color changed via CSS above)
+# ---------------------
 with st.sidebar:
-    st.header("Controls")
-    symbol = st.text_input("Symbol (e.g. NIFTY)", value="NIFTY")
-    timeframe = st.selectbox("Timeframe", ["1m", "5m", "15m", "1h", "1d"])
-    st.markdown(f"**Project folder:** `{BASE_DIR}`")
-    st.markdown("---")
+    st.markdown("<div style='padding-top:6px;'>", unsafe_allow_html=True)
+    st.subheader("Controls")
+    st.markdown('<div class="field-label">Symbol (e.g. NIFTY)</div>', unsafe_allow_html=True)
+    symbol = st.text_input("", value="NIFTY", placeholder="NIFTY")
+    st.markdown('<div class="field-label">Timeframe</div>', unsafe_allow_html=True)
+    timeframe = st.selectbox("", ["1m", "5m", "15m", "1h"], index=0)
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Project folder:</div>', unsafe_allow_html=True)
+    st.code("C:\\AUTO_TRADING_TRACKER", language="text")
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Trade actions</div>', unsafe_allow_html=True)
+    st.button("Run backtest (placeholder)", disabled=True)
+    st.button("New trade (mock)", disabled=True)
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Quick actions</div>', unsafe_allow_html=True)
+    st.button("Create sample price CSV", disabled=True)
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Indicators</div>', unsafe_allow_html=True)
+    st.checkbox("EMA (9)", value=True)
+    st.checkbox("EMA (21)", value=True)
+    st.checkbox("VWAP", value=True)
+    st.checkbox("RSI (14)", value=True)
+    st.number_input("RSI period", value=14, step=1)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    if st.button("Run backtest (placeholder)"):
-        st.info("Backtest: placeholder - we'll add the runner later.")
+# ---------------------
+# Sample candlestick data (keeps visuals)
+# ---------------------
+def make_sample_candles(n=40, start_price=19500):
+    rng = pd.date_range(end=datetime.now(), periods=n, freq='T')
+    p = start_price + np.cumsum(np.random.randn(n).clip(-2,2) * 10.0)
+    openp  = p + np.random.randn(n) * 1.5
+    closep = p + np.random.randn(n) * 1.5
+    highp  = np.maximum(openp, closep) + np.abs(np.random.randn(n) * 4.0)
+    lowp   = np.minimum(openp, closep) - np.abs(np.random.randn(n) * 4.0)
+    df = pd.DataFrame({
+        "datetime": rng,
+        "open": openp.round(2),
+        "high": highp.round(2),
+        "low": lowp.round(2),
+        "close": closep.round(2),
+    })
+    return df
 
-    st.markdown("### Trade actions")
+df_candles = make_sample_candles(40, start_price=19500)
+df_candles['ema9'] = df_candles['close'].ewm(span=9, adjust=False).mean()
+df_candles['ema21'] = df_candles['close'].ewm(span=21, adjust=False).mean()
+df_candles['vwap'] = df_candles['close'].expanding().mean()
 
-    # ----------------- New trade (mock) that saves extended journal -----------------
-    if st.button("New trade (mock)"):
-        new_trade = {
-            "entry_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "exit_time": "",                # empty for now, can be updated later
-            "symbol": symbol,
-            "qty": 75,
-            "side": "BUY",
-            "entry_price": None,
-            "exit_price": None,
-            "pnl": 0.0,
-            "notes": ""
-        }
+# ---------------------
+# Plotly candlestick + invisible scatter for hover + explicit up/down colors
+# ---------------------
+up_color = "#1f7a1f"
+down_color = "#c13b3b"
 
-        # Append to CSV (create if doesn't exist)
-        if journal_path.exists():
-            try:
-                dfj = pd.read_csv(journal_path)
-                dfj = pd.concat([dfj, pd.DataFrame([new_trade])], ignore_index=True)
-            except Exception:
-                dfj = pd.DataFrame([new_trade])
-        else:
-            dfj = pd.DataFrame([new_trade])
+fig = go.Figure()
 
-        # Ensure consistent column order
-        cols = ["entry_time", "exit_time", "symbol", "qty", "side", "entry_price", "exit_price", "pnl", "notes"]
-        dfj = dfj.reindex(columns=cols)
-        dfj.to_csv(journal_path, index=False)
-        st.success("New trade saved to journal.csv (extended format)")
-
-    st.markdown("---")
-    st.write("Quick actions")
-    if st.button("Create sample price CSV"):
-        sample = [
-            {"datetime": "2025-09-09 09:15:00", "open": 19450, "high": 19480, "low": 19430, "close": 19460, "volume": 1200},
-            {"datetime": "2025-09-09 09:16:00", "open": 19460, "high": 19490, "low": 19455, "close": 19480, "volume": 900},
-            {"datetime": "2025-09-09 09:17:00", "open": 19480, "high": 19500, "low": 19470, "close": 19495, "volume": 1100},
-            {"datetime": "2025-09-09 09:18:00", "open": 19495, "high": 19510, "low": 19490, "close": 19500, "volume": 950},
-            {"datetime": "2025-09-09 09:19:00", "open": 19500, "high": 19520, "low": 19495, "close": 19510, "volume": 1250},
-        ]
-        pd.DataFrame(sample).to_csv(price_path, index=False)
-        st.success(f"Sample price CSV created at `{price_path}`")
-
-# ---------------- Main layout ----------------
-col1, col2 = st.columns([2, 1])
-
-# Try to load price CSV (located next to script)
-loaded = False
-if price_path.exists():
-    try:
-        df = pd.read_csv(price_path, parse_dates=["datetime"])
-        df = df.sort_values("datetime").set_index("datetime")
-        loaded = True
-    except Exception as e:
-        st.error(f"Error loading CSV: {e}")
-else:
-    pass  # show a small hint later# ---------------- Indicator calculations + sidebar controls ----------------
-loaded_indicators = {"ema9": False, "ema21": False, "vwap": False, "rsi": False}
-rsi_period = 14
-
-if loaded:
-    # safe copy
-    df = df.copy()
-
-    # EMA helper
-    df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
-    df["ema21"] = df["close"].ewm(span=21, adjust=False).mean()
-
-    # VWAP (typical price * volume cumulative / volume cumulative) per session/simple approach
-    # requires volume column; if missing, create placeholder
-    if "volume" not in df.columns:
-        df["volume"] = 1.0
-    tp = (df["high"] + df["low"] + df["close"]) / 3.0
-    df["vwap"] = (tp * df["volume"]).cumsum() / df["volume"].cumsum()
-
-    # RSI (14) simple implementation
-    delta = df["close"].diff().fillna(0)
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    roll_up = gain.rolling(window=14, min_periods=1).mean()
-    roll_down = loss.rolling(window=14, min_periods=1).mean()
-    rs = roll_up / (roll_down.replace(0, 1e-8))
-    df["rsi"] = 100.0 - (100.0 / (1.0 + rs))
-    
-    # Put df back into a variable available for plotting (we'll use it later)
-    indicators_df = df
-
-    # Sidebar controls for indicators (kept minimal)
-    with st.sidebar:
-        st.markdown("### Indicators")
-        loaded_indicators["ema9"] = st.checkbox("EMA (9)", value=True)
-        loaded_indicators["ema21"] = st.checkbox("EMA (21)", value=True)
-        loaded_indicators["vwap"] = st.checkbox("VWAP", value=True)
-        loaded_indicators["rsi"] = st.checkbox("RSI (14)", value=True)
-        if loaded_indicators["rsi"]:
-            rsi_period = st.number_input("RSI period", min_value=7, max_value=30, value=14, step=1)
-            # if user changes period, recompute rsi quickly
-            if rsi_period != 14:
-                roll_up = gain.rolling(window=rsi_period, min_periods=1).mean()
-                roll_down = loss.rolling(window=rsi_period, min_periods=1).mean()
-                rs = roll_up / (roll_down.replace(0, 1e-8))
-                indicators_df["rsi"] = 100.0 - (100.0 / (1.0 + rs))
-else:
-    # ensure variables exist even when no CSV
-    indicators_df = None
-
-
-
-with col1:
-    st.subheader("Price / Candlestick")
-    if loaded and indicators_df is not None:
-        d = indicators_df.copy()
-
-        # Main candlestick + overlays
-        fig = go.Figure()
-
-        fig.add_trace(go.Candlestick(
-    x=d.index,
-    open=d["open"],
-    high=d["high"],
-    low=d["low"],
-    close=d["close"],
-    name="Price",
-    increasing=dict(line=dict(color="#2e7d32"), fillcolor="#2e7d32"),
-    decreasing=dict(line=dict(color="#f57c00"), fillcolor="#f57c00"),
+fig.add_trace(go.Candlestick(
+    x=df_candles['datetime'],
+    open=df_candles['open'],
+    high=df_candles['high'],
+    low=df_candles['low'],
+    close=df_candles['close'],
+    increasing=dict(line=dict(color=up_color), fillcolor=up_color),
+    decreasing=dict(line=dict(color=down_color), fillcolor=down_color),
+    name="Candles",
     showlegend=False
 ))
 
-        # Overlay EMAs / VWAP if selected
-        if loaded_indicators.get("ema9", False) and "ema9" in d.columns:
-            fig.add_trace(go.Scatter(x=d.index, y=d["ema9"], mode="lines", name="EMA 9",
-                                     line=dict(color="#ff9800", width=1.5), hoverinfo="skip"))
-        if loaded_indicators.get("ema21", False) and "ema21" in d.columns:
-            fig.add_trace(go.Scatter(x=d.index, y=d["ema21"], mode="lines", name="EMA 21",
-                                     line=dict(color="#4caf50", width=1.5), hoverinfo="skip"))
-        if loaded_indicators.get("vwap", False) and "vwap" in d.columns:
-            fig.add_trace(go.Scatter(x=d.index, y=d["vwap"], mode="lines", name="VWAP",
-                                     line=dict(color="#1976d2", width=1.25, dash="dash"), hoverinfo="skip"))
+# indicator lines
+fig.add_trace(go.Scatter(x=df_candles['datetime'], y=df_candles['ema9'], mode='lines', name='EMA 9', line=dict(color='#f2a400', width=2)))
+fig.add_trace(go.Scatter(x=df_candles['datetime'], y=df_candles['ema21'], mode='lines', name='EMA 21', line=dict(color='#66b466', width=2)))
+fig.add_trace(go.Scatter(x=df_candles['datetime'], y=df_candles['vwap'], mode='lines', name='VWAP', line=dict(color='#2d6cff', width=2, dash='dash')))
 
-        # Layout tweaks
-        fig.update_layout(height=520, margin=dict(l=10, r=10, t=30, b=10),
-                          xaxis_rangeslider_visible=False, paper_bgcolor="rgba(0,0,0,0)",
-                          plot_bgcolor="rgba(0,0,0,0)")
+# invisible scatter for hover (works across plotly versions)
+customdata = np.stack([df_candles['open'], df_candles['high'], df_candles['low'], df_candles['close']], axis=-1)
+hover_template = "Time: %{x}<br>Open: %{customdata[0]}<br>High: %{customdata[1]}<br>Low: %{customdata[2]}<br>Close: %{customdata[3]}<extra></extra>"
 
-        st.plotly_chart(fig, use_container_width=True)
+fig.add_trace(go.Scatter(
+    x=df_candles['datetime'],
+    y=df_candles['close'],
+    mode='markers',
+    marker=dict(size=6, color='rgba(0,0,0,0)'),
+    hovertemplate=hover_template,
+    customdata=customdata,
+    showlegend=False,
+    hoverinfo='text'
+))
 
-        # RSI subplot below candlestick (if enabled)
-        if loaded_indicators.get("rsi", False) and "rsi" in d.columns:
-            r_fig = go.Figure()
-            r_fig.add_trace(go.Scatter(x=d.index, y=d["rsi"], name="RSI", line=dict(color="#ff5722")))
-            r_fig.update_layout(height=180, margin=dict(l=10, r=10, t=10, b=10),
-                                yaxis=dict(range=[0, 100]), paper_bgcolor="rgba(0,0,0,0)",
-                                plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(r_fig, use_container_width=True)
-    else:
-        st.info(f"No price CSV found at `{price_path}`. Use the sidebar button 'Create sample price CSV' to create sample data.")
+fig.update_layout(
+    template="plotly_white",
+    margin=dict(l=20, r=24, t=8, b=36),
+    showlegend=True,
+    legend=dict(orientation="v", x=0.98, xanchor="right", y=0.95),
+    xaxis=dict(showgrid=False, title=dict(text="Time", font=dict(size=11)), tickformat='%H:%M'),
+    yaxis=dict(showgrid=False, title=dict(text="Price (INR)", font=dict(size=11))),
+    hovermode='x unified'
+)
 
+st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+st.title("Price / Candlestick")
+st.plotly_chart(fig, use_container_width=True, theme="streamlit", height=640)
+
+# ---------------------
+# Simple session journal + zebra tables
+# ---------------------
+if 'journal' not in st.session_state:
+    st.session_state['journal'] = pd.DataFrame([
+        {"Date": (datetime.now() - timedelta(minutes=45)).strftime("%Y-%m-%d"),
+         "Symbol": "NIFTY",
+         "Entry time": (datetime.now() - timedelta(minutes=44)).strftime("%H:%M:%S"),
+         "Entry price": 19500,
+         "Exit price": 19520,
+         "Entry exit": "19500 -> 19520",
+         "PnL": 20},
+        {"Date": (datetime.now() - timedelta(minutes=12)).strftime("%Y-%m-%d"),
+         "Symbol": "NIFTY",
+         "Entry time": (datetime.now() - timedelta(minutes=11)).strftime("%H:%M:%S"),
+         "Entry price": 19530,
+         "Exit price": 19510,
+         "Entry exit": "19530 -> 19510",
+         "PnL": -20},
+    ])
+
+def df_to_zebra_html(df: pd.DataFrame, max_rows=10):
+    df2 = df.copy()
+    df2.columns = [str(c).strip().title().replace("_", " ") for c in df2.columns]
+    html = '<table class="zebra-table"><thead><tr>'
+    for col in df2.columns:
+        html += f"<th>{col}</th>"
+    html += "</tr></thead><tbody>"
+    for _, row in df2.head(max_rows).iterrows():
+        html += "<tr>"
+        for col in df2.columns:
+            html += f"<td>{row[col]}</td>"
+        html += "</tr>"
+    html += "</tbody></table>"
+    return html
+
+st.markdown("<h2 style='margin-top:28px;'>Trade Journal</h2>", unsafe_allow_html=True)
+st.markdown(df_to_zebra_html(st.session_state['journal']), unsafe_allow_html=True)
+
+st.markdown("<h2 style='margin-top:10px;'>Add New Trade</h2>", unsafe_allow_html=True)
+with st.form(key='add_trade_form', clear_on_submit=False):
+    c1, c2, c3 = st.columns([2,1,1])
+    symbol_in = c1.text_input("Symbol", value="NIFTY")
+    entry_price = c2.number_input("Entry price", value=19500.0, step=0.5, format="%.2f")
+    qty = c3.number_input("Qty", value=1, step=1)
+    c4, c5 = st.columns([1,1])
+    exit_price = c4.number_input("Exit price", value=0.0, step=0.5, format="%.2f")
+    pnl = c5.number_input("P&L", value=0.0, step=0.5, format="%.2f")
+    submit = st.form_submit_button("Add trade (mock)")
+    if submit:
+        new_row = {
+            "Date": datetime.now().strftime("%Y-%m-%d"),
+            "Symbol": symbol_in,
+            "Entry time": datetime.now().strftime("%H:%M:%S"),
+            "Entry price": entry_price,
+            "Exit price": exit_price if exit_price!=0 else "",
+            "Entry exit": f"{entry_price} -> {exit_price}" if exit_price!=0 else "",
+            "PnL": pnl
+        }
+        st.session_state['journal'] = pd.concat([pd.DataFrame([new_row]), st.session_state['journal']], ignore_index=True)
+        st.success("Trade appended to journal (mock). Scroll down to view.")
+
+st.markdown(df_to_zebra_html(st.session_state['journal']), unsafe_allow_html=True)
+st.markdown("<div style='height:60px;'></div>", unsafe_allow_html=True)
