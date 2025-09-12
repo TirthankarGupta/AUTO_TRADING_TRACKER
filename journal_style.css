@@ -1,0 +1,31 @@
+﻿/* journal_style.css — header, sidebar, badges and table theme */
+:root {
+  --navy: #0b1d3a;
+  --accent: #f6a623;
+  --green: #2ca02c;
+  --muted: #eef6f0;
+}
+
+header, .css-1q8dd3e { padding-top:0 !important; } /* attempt to reduce top gap */
+h1 { font-size:28px; color:var(--accent); }
+
+/* header block look */
+.header-block { background: var(--navy) !important; color: #fff !important; padding: 10px 18px; border-radius:6px; }
+
+/* sidebar */
+section[data-testid="stSidebar"] { background: var(--navy) !important; color: #fff !important; padding: 20px 12px; }
+/* sidebar text */
+section[data-testid="stSidebar"] span, section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] .stNumberInput { color:#fff !important; }
+
+/* AT badge */
+.at-badge { background: var(--accent); color: var(--navy); padding:6px 10px; border-radius:8px; font-weight:700; }
+
+/* PnL badge */
+.pnl-badge { background: var(--accent); color: #0b1730; padding:8px 12px; border-radius:8px; box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+
+/* progress bar segments */
+.pn-progress { background: var(--muted); border-radius: 8px; overflow:hidden; }
+.pn-progress .bar { background: var(--green); height:12px; }
+
+/* smaller tweaks for dataset table */
+[data-testid="stDataFrame"] table th { text-transform: none; font-weight:600; }

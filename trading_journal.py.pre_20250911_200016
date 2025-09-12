@@ -1,0 +1,360 @@
+﻿# trading_journal.py — Consolidated Trading Journal (tz-safe, candles, indicators, alerts, backups)
+"""
+Trading Journal — consolidated single-file app.
+Run: streamlit run trading_journal.py
+"""
+import os, io, math
+from datetime import datetime, timezone, timedelta
+import pandas as pd
+import numpy as np
+import streamlit as st
+import pytz
+import plotly.graph_objects as go
+
+# Page config
+st.set_page_config(page_title="Trading Journal", layout="wide", initial_sidebar_state="expanded")
+KOLKATA = pytz.timezone("Asia/Kolkata")
+
+# ------------------------
+# Helpers: indicators + datetime tz-safe
+# ------------------------
+def ema(series: pd.Series, span: int) -> pd.Series:
+    return series.ewm(span=span, adjust=False).mean()
+
+def rsi(series: pd.Series, length: int = 14) -> pd.Series:
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ma_up = up.ewm(alpha=1/length, adjust=False).mean()
+    ma_down = down.ewm(alpha=1/length, adjust=False).mean()
+    rs = ma_up / (ma_down.replace(0, 1e-10))
+    return 100 - (100 / (1 + rs))
+
+def tz_localize_series(s: pd.Series, tz):
+    # Accept strings or datetimes; ensure tz-aware in given tz
+    s2 = pd.to_datetime(s, errors="coerce")
+    if s2.dt.tz is None or s2.dt.tz is pd.NaT:
+        try:
+            return s2.dt.tz_localize(tz)
+        except Exception:
+            # fallback: treat as naive then localize
+            return s2.dt.tz_localize(tz, ambiguous='NaT', nonexistent='shift_forward')
+    else:
+        return s2.dt.tz_convert(tz)
+
+def compute_pnl_units(row, default_lot_size):
+    try:
+        lots = float(row.get("quantity", 0.0))
+        lot_size = float(row.get("lot_size", default_lot_size)) if not pd.isna(row.get("lot_size", np.nan)) else float(default_lot_size)
+        units = lots * lot_size
+        ep = float(row.get("entry_price", np.nan))
+        xp = float(row.get("exit_price", np.nan))
+        fees = float(row.get("fees", 0.0)) if not pd.isna(row.get("fees", np.nan)) else 0.0
+        if np.isnan(ep) or np.isnan(xp) or units == 0:
+            return np.nan
+        return (xp - ep) * units - fees
+    except Exception:
+        return np.nan
+
+# ------------------------
+# Load optional CSS
+# ------------------------
+css_path = "journal_style.css"
+if os.path.exists(css_path):
+    try:
+        with open(css_path, "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except Exception:
+        pass
+
+# ------------------------
+# UI: Sidebar controls
+# ------------------------
+with st.sidebar:
+    st.markdown("### Controls")
+    initial_balance = st.number_input("Initial starting balance (₹)", value=100000.0, step=1000.0, format="%.2f")
+    default_fees = st.number_input("Default per-trade fees (₹) if missing", value=0.0, step=1.0, format="%.2f")
+    global_lot_size = st.number_input("Default lot size (units per lot)", value=75, step=1)
+    show_candles = st.checkbox("Show candles (mock OHLC)", value=True)
+    st.markdown("#### Force Signal (testing)")
+    force_mode = st.radio("", options=["Auto","BUY_CE","BUY_PE"], index=0)
+    st.markdown("---")
+    max_trades = st.number_input("Discipline: Max trades/day", value=10, step=1)
+    daily_target = st.number_input("Daily profit target (₹)", value=5000.0, step=100.0)
+    daily_stop = st.number_input("Daily stop-loss (₹)", value=-5000.0, step=100.0)
+    st.markdown("---")
+    # Export helper
+    if st.button("Run day-end export now"):
+        st.session_state["_run_export_now"] = True
+
+# ------------------------
+# Data load & sample data or trades.csv
+# ------------------------
+trades_path = "trades.csv"
+df_raw = None
+if os.path.exists(trades_path):
+    try:
+        df_raw = pd.read_csv(trades_path)
+        st.success(f"Loaded {len(df_raw)} rows from trades.csv")
+    except Exception as e:
+        st.error(f"Failed to read trades.csv: {e}")
+        df_raw = None
+
+# if no data, use sample
+def sample_trades():
+    return pd.DataFrame([
+        {"symbol":"NIFTY24SEP24700CE","quantity":1,"lot_size":75,"entry_price":20.0,"exit_price":45.0,"entry_time":"2025-09-01 09:17:00","exit_time":"2025-09-01 09:43:00","fees":15,"notes":"Breakout"},
+        {"symbol":"NIFTY24SEP24800CE","quantity":2,"lot_size":75,"entry_price":12.0,"exit_price":7.0,"entry_time":"2025-09-01 10:05:00","exit_time":"2025-09-01 10:45:00","fees":10,"notes":"Volatile"}
+    ])
+
+if df_raw is None or df_raw.empty:
+    df_raw = sample_trades()
+    st.info("Using sample dataset. Upload your CSV to use real trades.")
+
+# Normalize headers
+df = df_raw.copy()
+df.columns = [str(c).strip().lower() for c in df.columns]
+
+# Ensure columns
+required = ["symbol","quantity","lot_size","entry_price","exit_price","entry_time","exit_time","fees","notes","open","high","low","close"]
+for c in ["symbol","quantity","lot_size","entry_price","exit_price","entry_time","exit_time","fees","notes"]:
+    if c not in df.columns:
+        df[c] = np.nan
+
+# If OHLC not present, create mock OHLC (so candles show)
+if not set(["open","high","low","close"]).issubset(set(df.columns)):
+    # Generate mocked OHLC around a base price with timestamps across the day
+    base = 25000.0
+    n = max(20, len(df)*5)
+    times = pd.date_range(start=datetime.now().replace(hour=9,minute=15,second=0,microsecond=0), periods=n, freq='10min')
+    prices = base + np.cumsum(np.random.randn(n)) * 6
+    openp = prices + np.random.randn(n) * 1.5
+    closep = prices + np.random.randn(n) * 1.5
+    highp = np.maximum(openp, closep) + np.abs(np.random.randn(n) * 2)
+    lowp = np.minimum(openp, closep) - np.abs(np.random.randn(n) * 2)
+    candles = pd.DataFrame({"timestamp": times, "open": openp, "high": highp, "low": lowp, "close": closep})
+    candles["timestamp"] = tz_localize_series(candles["timestamp"], KOLKATA)
+else:
+    # build candles df from trades.csv if present
+    # If file contains timestamp column called 'timestamp' or entry_time, use that
+    if "timestamp" in df.columns:
+        candles = df[["timestamp","open","high","low","close"]].dropna()
+        candles["timestamp"] = tz_localize_series(candles["timestamp"], KOLKATA)
+    else:
+        # fallback: use generated mock
+        base = 25000.0
+        n = 30
+        times = pd.date_range(start=datetime.now().replace(hour=9,minute=15,second=0,microsecond=0), periods=n, freq='10min')
+        prices = base + np.cumsum(np.random.randn(n)) * 6
+        openp = prices + np.random.randn(n) * 1.5
+        closep = prices + np.random.randn(n) * 1.5
+        highp = np.maximum(openp, closep) + np.abs(np.random.randn(n) * 2)
+        lowp = np.minimum(openp, closep) - np.abs(np.random.randn(n) * 2)
+        candles = pd.DataFrame({"timestamp": times, "open": openp, "high": highp, "low": lowp, "close": closep})
+        candles["timestamp"] = tz_localize_series(candles["timestamp"], KOLKATA)
+
+# Compute indicators on candles
+candles_df = candles.copy().reset_index(drop=True)
+candles_df["ema9"] = ema(candles_df["close"], 9)
+candles_df["ema21"] = ema(candles_df["close"], 21)
+candles_df["rsi14"] = rsi(candles_df["close"], 14)
+
+# ------------------------
+# Build chart (Plotly)
+# ------------------------
+def plot_candles_with_indicators(dfc):
+    fig = go.Figure()
+    # Candlesticks — use increasing/decreasing colors, thicker wick
+    fig.add_trace(go.Candlestick(
+        x=dfc["timestamp"],
+        open=dfc["open"],
+        high=dfc["high"],
+        low=dfc["low"],
+        close=dfc["close"],
+        increasing_line_color='green',
+        decreasing_line_color='red',
+        increasing_fillcolor='green',
+        decreasing_fillcolor='red',
+        whiskerwidth=0.8,
+        name='Price'
+    ))
+    # EMA overlays
+    fig.add_trace(go.Scatter(x=dfc["timestamp"], y=dfc["ema9"], mode='lines', name='EMA9', line=dict(width=1.5, dash='solid', color='orange')))
+    fig.add_trace(go.Scatter(x=dfc["timestamp"], y=dfc["ema21"], mode='lines', name='EMA21', line=dict(width=1.5, dash='dot', color='blue')))
+    # Layout: remove gridlines, white background
+    fig.update_layout(
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        xaxis=dict(title='Time (IST)', showgrid=False, tickangle=0),
+        yaxis=dict(title='Premium', showgrid=False),
+        margin=dict(l=40, r=20, t=20, b=60),
+        showlegend=True,
+        height=520
+    )
+    return fig
+
+# ------------------------
+# Header and progress
+# ------------------------
+st.markdown("""
+<div style="background:#0b1d3a;padding:10px;border-radius:6px;display:flex;align-items:center">
+  <div style="width:44px;height:44px;background:#f0a500;border-radius:6px;margin-right:12px;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#0b1d3a">AT</div>
+  <h1 style="margin:0;color:white">Trading Journal</h1>
+</div>
+""", unsafe_allow_html=True)
+
+# compute ledger & pnl
+# parse times from df (trades table)
+for col in ["entry_time","exit_time"]:
+    if col in df.columns:
+        df[col + "_parsed"] = tz_localize_series(df[col], KOLKATA)
+    else:
+        df[col + "_parsed"] = pd.NaT
+
+df["quantity"] = pd.to_numeric(df.get("quantity", np.nan), errors="coerce").fillna(0)
+df["lot_size"] = pd.to_numeric(df.get("lot_size", np.nan), errors="coerce").fillna(global_lot_size)
+df["entry_price"] = pd.to_numeric(df.get("entry_price", np.nan), errors="coerce")
+df["exit_price"] = pd.to_numeric(df.get("exit_price", np.nan), errors="coerce")
+df["fees"] = pd.to_numeric(df.get("fees", np.nan), errors="coerce").fillna(default_fees)
+
+df["pnl"] = df.apply(lambda r: compute_pnl_units(r, global_lot_size), axis=1)
+
+# cumulative balance
+running = float(initial_balance)
+cumulatives = []
+for _, r in df.iterrows():
+    if pd.notna(r.get("exit_price")) and pd.notna(r.get("exit_time_parsed")):
+        pnl = 0.0 if pd.isna(r.get("pnl")) else float(r.get("pnl"))
+        running += pnl
+        cumulatives.append(running)
+    else:
+        cumulatives.append(running)
+df["cumulative_balance"] = cumulatives
+
+# day count for discipline
+today = datetime.now(tz=KOLKATA).date()
+df["exit_date"] = df["exit_time_parsed"].dt.tz_convert(KOLKATA).dt.date
+trades_today = int((df["exit_date"] == today).sum())
+
+# PnL metrics
+total_pnl = float(df["pnl"].sum() if "pnl" in df.columns else 0.0)
+progress_fraction = min(max(total_pnl / (daily_target if daily_target != 0 else 1.0), 0.0), 1.0)
+
+# PnL badge + progress bar
+col1, col2 = st.columns([1,8])
+with col1:
+    st.markdown(f"<div style='background:#ff7f11;color:white;padding:8px;border-radius:8px;display:inline-block;box-shadow:0 2px 6px rgba(0,0,0,0.15)'>PnL Progress: ₹{total_pnl:,.2f}</div>", unsafe_allow_html=True)
+with col2:
+    st.progress(progress_fraction)
+
+# Discipline alert
+if trades_today > max_trades:
+    st.warning(f"Discipline alert: trades today = {trades_today} exceeds max {max_trades}. Consider stopping trading for today.")
+
+# signal display — apply force_mode
+if force_mode == "Auto":
+    # simple signal: based on last EMA crossover
+    last = candles_df.iloc[-1]
+    signal = "HOLD"
+    if not pd.isna(last["ema9"]) and not pd.isna(last["ema21"]):
+        if last["ema9"] > last["ema21"]:
+            signal = "BUY_CE"
+        elif last["ema9"] < last["ema21"]:
+            signal = "BUY_PE"
+else:
+    signal = force_mode
+
+st.markdown(f"**Latest signal:** {signal}")
+
+# ------------------------
+# Plot region
+# ------------------------
+if show_candles:
+    fig = plot_candles_with_indicators(candles_df)
+    st.plotly_chart(fig, use_container_width=True, width='stretch')
+
+# show RSI below as small chart
+try:
+    fig_r = go.Figure()
+    fig_r.add_trace(go.Scatter(x=candles_df["timestamp"], y=candles_df["rsi14"], mode='lines', name='RSI14', line=dict(color='purple')))
+    fig_r.update_layout(height=160, margin=dict(l=40,r=20,t=10,b=20), yaxis=dict(title='RSI', range=[0,100]), xaxis=dict(showgrid=False))
+    st.plotly_chart(fig_r, use_container_width=True, width='stretch')
+except Exception:
+    pass
+
+# ------------------------
+# Display ledger (rename columns, remove trade_id for display)
+# ------------------------
+display_df = df.copy()
+# drop trade_id if present
+if "trade_id" in display_df.columns:
+    display_df = display_df.drop(columns=["trade_id"])
+# rename headers: initial caps, no underscores
+rename_map = {}
+for c in display_df.columns:
+    pretty = " ".join([p.capitalize() for p in str(c).replace("_"," ").split()])
+    rename_map[c] = pretty
+display_df = display_df.rename(columns=rename_map)
+
+st.subheader("Trade Ledger")
+# show dataframe stretch
+st.dataframe(display_df, width='stretch')
+
+# ------------------------
+# Export utilities + monthly backup
+# ------------------------
+def export_visible(df_export, prefix="trading_journal"):
+    try:
+        os.makedirs("exports", exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csvp = os.path.join("exports", f"{prefix}_{ts}.csv")
+        df_export.to_csv(csvp, index=False)
+        return csvp
+    except Exception as e:
+        return None
+
+if st.button("Export visible table to CSV"):
+    res = export_visible(display_df, prefix="trading_journal")
+    if res:
+        st.success(f"Exported to {res}")
+    else:
+        st.error("Export failed")
+
+# run immediate export if requested
+if st.session_state.get("_run_export_now", False):
+    res = export_visible(display_df, prefix="trading_journal_manual")
+    if res:
+        st.success(f"Manual export: {res}")
+    else:
+        st.error("Manual export failed")
+    st.session_state["_run_export_now"] = False
+
+# monthly backup & reset (if first day of month)
+try:
+    now = datetime.now(tz=KOLKATA)
+    if os.path.exists(trades_path) and now.day == 1:
+        marker = ".last_month_backup"
+        done_for = None
+        if os.path.exists(marker):
+            with open(marker,"r",encoding="utf-8") as f:
+                done_for = f.read().strip()
+        current_month = now.strftime("%Y%m")
+        if done_for != current_month:
+            # move trades.csv to exports/month_backup_YYYYMM.csv
+            os.makedirs("exports", exist_ok=True)
+            dest = os.path.join("exports", f"trades_backup_{current_month}.csv")
+            try:
+                os.replace(trades_path, dest)
+                # create an empty trades.csv with header approximate
+                header = "symbol,quantity,lot_size,entry_price,exit_price,entry_time,exit_time,fees,notes"
+                with open(trades_path,"w",encoding="utf-8") as f:
+                    f.write(header + "\n")
+                with open(marker,"w",encoding="utf-8") as f:
+                    f.write(current_month)
+                st.info(f"Monthly backup performed: {dest}")
+            except Exception as e:
+                st.error(f"Monthly backup failed: {e}")
+except Exception:
+    pass
+
+# End of file

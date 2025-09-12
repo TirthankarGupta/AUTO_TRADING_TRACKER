@@ -1,0 +1,315 @@
+﻿# trading_journal.py — clean, full-featured trading journal (mock candles & indicators)
+"""
+Trading Journal — BUY-only (UI + mock OHLC candlesticks + indicators + ledger)
+Run:
+    streamlit run trading_journal.py
+"""
+import os, io
+from datetime import datetime, timedelta
+import pandas as pd
+import numpy as np
+import streamlit as st
+import pytz
+import plotly.graph_objects as go
+
+# Page config
+st.set_page_config(page_title="Trading Journal", layout="wide", initial_sidebar_state="expanded")
+
+# Attempt to load external CSS (optional)
+try:
+    css_path = "journal_style.css"
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as __f:
+            st.markdown(f"<style>{__f.read()}</style>", unsafe_allow_html=True)
+except Exception:
+    pass
+
+# Timezone
+KOLKATA = pytz.timezone("Asia/Kolkata")
+
+# ---------- helpers: indicators ----------
+def ema(series: pd.Series, span: int) -> pd.Series:
+    return series.ewm(span=span, adjust=False).mean()
+
+def rsi(series: pd.Series, length: int = 14) -> pd.Series:
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ma_up = up.ewm(alpha=1/length, adjust=False).mean()
+    ma_down = down.ewm(alpha=1/length, adjust=False).mean()
+    rs = ma_up / (ma_down.replace(0, 1e-10))
+    return 100 - (100 / (1 + rs))
+
+# ---------- mock OHLC generator (synthetic candles) ----------
+def generate_mock_ohlc(n=30, start_price=25000.0):
+    ts_now = datetime.now(tz=KOLKATA)
+    rows = []
+    price = float(start_price)
+    for i in range(n):
+        open_p = price
+        # small random move
+        change = np.random.choice([+5, +3, +2, -2, -3, -5], p=[0.15,0.2,0.2,0.2,0.15,0.1])
+        close_p = open_p + change
+        high_p = max(open_p, close_p) + np.random.randint(0,3)
+        low_p  = min(open_p, close_p) - np.random.randint(0,3)
+        ts = ts_now - pd.Timedelta(minutes=(n-1-i)*5)  # 5-min candles
+        rows.append({"timestamp": ts, "open": round(open_p,2), "high": round(high_p,2),
+                     "low": round(low_p,2), "close": round(close_p,2)})
+        price = close_p
+    return pd.DataFrame(rows)
+
+# ---------- signal logic ----------
+def compute_signal_from_candles(df):
+    # expects df with 'close'
+    if len(df) < 2:
+        return "HOLD"
+    closes = pd.to_numeric(df["close"], errors="coerce")
+    e9 = ema(closes, 9)
+    e21 = ema(closes, 21)
+    r = rsi(closes, 14)
+    latest_idx = len(df) - 1
+    if pd.isna(e9.iloc[latest_idx]) or pd.isna(e21.iloc[latest_idx]) or pd.isna(r.iloc[latest_idx]):
+        return "HOLD"
+    if e9.iloc[latest_idx] > e21.iloc[latest_idx] and r.iloc[latest_idx] < 70:
+        return "BUY_CE"
+    if e9.iloc[latest_idx] < e21.iloc[latest_idx] and r.iloc[latest_idx] > 30:
+        return "BUY_PE"
+    return "HOLD"
+
+# ---------- file loading (trades) ----------
+def sample_trades_df():
+    return pd.DataFrame([
+        {"symbol":"NIFTY24SEP24700CE","quantity":1,"lot_size":75,"entry_price":20.0,"exit_price":45.0,"entry_time":"2025-09-01 09:17:00","exit_time":"2025-09-01 09:43:00","fees":15,"notes":"Breakout"},
+        {"symbol":"NIFTY24SEP24800CE","quantity":2,"lot_size":75,"entry_price":12.0,"exit_price":7.0,"entry_time":"2025-09-01 10:05:00","exit_time":"2025-09-01 10:45:00","fees":10,"notes":"Volatile"},
+    ])
+
+trades_path = "trades.csv"
+if os.path.exists(trades_path):
+    try:
+        df_trades = pd.read_csv(trades_path)
+        st.success(f"Loaded {len(df_trades)} rows from trades.csv")
+    except Exception as e:
+        st.error(f"Failed to load trades.csv: {e}")
+        df_trades = sample_trades_df()
+        st.info("Using sample trades (fallback).")
+else:
+    df_trades = sample_trades_df()
+    st.info("Using sample dataset. Upload trades.csv to use real trades.")
+
+# Normalize headers: make them readable later
+df_trades.columns = [str(c).strip().lower() for c in df_trades.columns]
+# Ensure columns exist (add if missing)
+for c in ["symbol","quantity","lot_size","entry_price","exit_price","entry_time","exit_time","fees","notes"]:
+    if c not in df_trades.columns:
+        df_trades[c] = np.nan
+
+# ---------- sidebar UI ----------
+with st.sidebar:
+    st.markdown("**Controls**", unsafe_allow_html=True)
+    initial_balance = st.number_input("Initial starting balance (₹)", value=100000.0, step=1000.0, format="%.2f")
+    default_fees = st.number_input("Default per-trade fees (₹) if missing", value=0.0, step=1.0, format="%.2f")
+    default_lot_size = st.number_input("Default lot size (units per lot)", value=75, step=1)
+    show_candles = st.checkbox("Show candles (mock OHLC)", value=True)
+    force_mode = st.radio("Force Signal (testing)", options=["Auto","BUY_CE","BUY_PE"], index=0)
+    max_trades_day = st.number_input("Discipline: Max trades/day", value=10, step=1)
+    pnl_target = st.number_input("Daily profit target (₹)", value=5000.0, step=100.0)
+    pnl_stop = st.number_input("Daily stop-loss (₹)", value=-5000.0, step=100.0)
+
+# ---------- header + logo ----------
+st.markdown("""
+<div style="background:#0b3355;padding:8px 16px;border-radius:4px;color:white;display:flex;align-items:center;">
+  <div style="width:46px;height:46px;border-radius:8px;background:#0b3355;display:flex;align-items:center;justify-content:center;margin-right:12px;">
+    <div style="width:32px;height:32px;border-radius:6px;background:#ffd166;color:#0b3355;font-weight:700;display:flex;align-items:center;justify-content:center;">AT</div>
+  </div>
+  <h2 style="margin:0;color:white">Trading Journal</h2>
+</div>
+""", unsafe_allow_html=True)
+
+# ---------- mock candles ----------
+candles_df = generate_mock_ohlc(n=28, start_price=25000.0)
+candles_df = candles_df.sort_values("timestamp")
+
+# compute indicators on mock close series (for display)
+candles_df["ema9"] = ema(candles_df["close"], 9)
+candles_df["ema21"] = ema(candles_df["close"], 21)
+candles_df["rsi14"] = rsi(candles_df["close"], 14)
+
+# derive signal
+auto_signal = compute_signal_from_candles(candles_df)
+signal = auto_signal if force_mode == "Auto" else force_mode
+
+# ---------- cumulative pnl / progress ----------
+# compute pnl column for trades if possible
+def compute_pnl_row(r):
+    try:
+        qty = float(r.get("quantity", 0.0))
+        lot = float(r.get("lot_size", default_lot_size))
+        ep = float(r.get("entry_price", np.nan))
+        xp = float(r.get("exit_price", np.nan))
+        if np.isnan(ep) or np.isnan(xp):
+            return np.nan
+        return (xp - ep) * qty * lot - float(r.get("fees", 0.0))
+    except Exception:
+        return np.nan
+
+df_trades["quantity"] = pd.to_numeric(df_trades["quantity"], errors="coerce").fillna(0)
+df_trades["lot_size"] = pd.to_numeric(df_trades["lot_size"], errors="coerce").fillna(default_lot_size)
+df_trades["pnl"] = df_trades.apply(compute_pnl_row, axis=1)
+total_pnl = float(df_trades["pnl"].sum(skipna=True) if "pnl" in df_trades.columns else 0.0)
+# progress pct
+target = float(pnl_target)
+progress = min(max((total_pnl / target) if target != 0 else 0.0, -1.0), 1.0)
+
+# styled PnL sub-header (button-like orange)
+st.markdown(f"""
+<div style="margin-top:8px;display:flex;align-items:center;gap:16px;">
+  <div style="background:#ff7f11;color:white;padding:8px 12px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.15);font-weight:700;">
+    PnL Progress: ₹{total_pnl:,.2f}
+  </div>
+  <div style="flex:1;">
+    <div style="background:#e9f8ee;border-radius:6px;overflow:hidden;height:12px;">
+      <div style="width:{max(min(progress,1.0),-1.0)*100}%;background:#28a745;height:100%"></div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown(f"**Latest signal:** `{signal}`")
+
+# ---------- candlestick plot (no gridlines) ----------
+if show_candles:
+    fig = go.Figure(data=[go.Candlestick(
+        x=candles_df["timestamp"],
+        open=candles_df["open"],
+        high=candles_df["high"],
+        low=candles_df["low"],
+        close=candles_df["close"],
+        increasing_line_color='#2ca02c', decreasing_line_color='#d62728',
+        increasing_fillcolor='#2ca02c', decreasing_fillcolor='#d62728',
+        whiskerwidth=0.6
+    )
+# --- indicator overlays (added by patch) ---
+try:
+    # ensure timestamp parsed column for x-axis exists
+    if "timestamp_parsed" not in candles_df.columns and "timestamp" in candles_df.columns:
+        # try convert epoch or string timestamps to datetime
+        try:
+            candles_df["timestamp_parsed"] = pd.to_datetime(candles_df["timestamp"], unit="s", errors="coerce")
+        except Exception:
+            candles_df["timestamp_parsed"] = pd.to_datetime(candles_df["timestamp"], errors="coerce")
+
+    # Overlay EMAs on top of candles (if present)
+    if "ema9" in candles_df.columns and "ema21" in candles_df.columns:
+        fig.add_trace(go.Scatter(x=candles_df["timestamp_parsed"], y=candles_df["ema9"],
+                                 mode="lines", name="EMA9", line=dict(color="#ff9900", width=1.6)))
+        fig.add_trace(go.Scatter(x=candles_df["timestamp_parsed"], y=candles_df["ema21"],
+                                 mode="lines", name="EMA21", line=dict(color="#0057b7", width=1.6)))
+
+    # Add RSI as a secondary (small) y-axis at bottom if available
+    if "rsi14" in candles_df.columns:
+        # add RSI trace but keep it legend-only by default (so UI is clean)
+        fig.add_trace(go.Scatter(x=candles_df["timestamp_parsed"], y=candles_df["rsi14"],
+                                 name="RSI14", line=dict(color="#6a0dad", width=1.5),
+                                 yaxis="y2", visible="legendonly"))
+        # update layout to create y2 area at bottom
+        fig.update_layout(yaxis=dict(domain=[0.22, 1]),
+                          yaxis2=dict(domain=[0.0, 0.18], title="RSI", anchor="x", rangemode="tozero"),
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+except Exception as _e:
+    # non-fatal: if plotting fails, leave candles as-is and log to console
+    print("Indicator overlay patch: failed to draw indicators:", _e)
+# --- end patch ---
+# --- indicator overlays (added by patch) ---
+try:
+    # ensure timestamp parsed column for x-axis exists
+    if "timestamp_parsed" not in candles_df.columns and "timestamp" in candles_df.columns:
+        # try convert epoch or string timestamps to datetime
+        try:
+            candles_df["timestamp_parsed"] = pd.to_datetime(candles_df["timestamp"], unit="s", errors="coerce")
+        except Exception:
+            candles_df["timestamp_parsed"] = pd.to_datetime(candles_df["timestamp"], errors="coerce")
+
+    # Overlay EMAs on top of candles (if present)
+    if "ema9" in candles_df.columns and "ema21" in candles_df.columns:
+        fig.add_trace(go.Scatter(x=candles_df["timestamp_parsed"], y=candles_df["ema9"],
+                                 mode="lines", name="EMA9", line=dict(color="#ff9900", width=1.6)))
+        fig.add_trace(go.Scatter(x=candles_df["timestamp_parsed"], y=candles_df["ema21"],
+                                 mode="lines", name="EMA21", line=dict(color="#0057b7", width=1.6)))
+
+    # Add RSI as a secondary (small) y-axis at bottom if available
+    if "rsi14" in candles_df.columns:
+        # add RSI trace but keep it legend-only by default (so UI is clean)
+        fig.add_trace(go.Scatter(x=candles_df["timestamp_parsed"], y=candles_df["rsi14"],
+                                 name="RSI14", line=dict(color="#6a0dad", width=1.5),
+                                 yaxis="y2", visible="legendonly"))
+        # update layout to create y2 area at bottom
+        fig.update_layout(yaxis=dict(domain=[0.22, 1]),
+                          yaxis2=dict(domain=[0.0, 0.18], title="RSI", anchor="x", rangemode="tozero"),
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+except Exception as _e:
+    # non-fatal: if plotting fails, leave candles as-is and log to console
+    print("Indicator overlay patch: failed to draw indicators:", _e)
+# --- end patch ---])
+    # remove gridlines and style axes
+    fig.update_layout(
+        template="plotly_white",
+        xaxis=dict(title="Time (IST)", showgrid=False, tickformat="%H:%M\n%b %d"),
+        yaxis=dict(title="Premium", showgrid=False),
+        margin=dict(l=40, r=20, t=10, b=40),
+        height=420
+    )
+    st.plotly_chart(fig, width='stretch')
+
+# ---------- ledger display (clean headers, drop trade_id) ----------
+st.markdown("### Trade Ledger")
+# drop trade_id column if present for display
+display_df = df_trades.copy()
+if "trade_id" in display_df.columns:
+    display_df = display_df.drop(columns=["trade_id"])
+# rename headers to Initial Caps, no underscores
+display_df = display_df.rename(columns=lambda c: str(c).replace("_"," ").title())
+st.dataframe(display_df, width='stretch')
+
+# ---------- discipline alerts (data-driven) ----------
+# trades today count
+today = datetime.now().astimezone(KOLKATA).date()
+# for simplicity, count all rows with entry_time parsed as today
+def safe_parse_dt(v):
+    try:
+        return pd.to_datetime(v)
+    except Exception:
+        return pd.NaT
+et = display_df.get("Entry Time", pd.Series([pd.NaT]*len(display_df)))
+entry_parsed = et.apply(safe_parse_dt)
+trades_today = entry_parsed.dt.date.fillna(pd.NaT)
+count_today = int((trades_today == today).sum() if not entry_parsed.empty else 0)
+if count_today > max_trades_day:
+    st.warning(f"Discipline Alert — trades today: {count_today} > {max_trades_day}. Consider stopping trading for the day.")
+
+if total_pnl >= pnl_target:
+    st.success(f"Profit target reached: ₹{total_pnl:,.2f} (target: ₹{pnl_target:,.2f})")
+elif total_pnl <= pnl_stop:
+    st.error(f"Stop-loss hit: ₹{total_pnl:,.2f} (stop: ₹{pnl_stop:,.2f})")
+
+# ---------- auto-export at day-end (simple safe routine) ----------
+def daily_backup_export(df):
+    try:
+        os.makedirs("exports", exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csvp = os.path.join("exports", f"trades_backup_{ts}.csv")
+        df.to_csv(csvp, index=False)
+        return csvp
+    except Exception:
+        return None
+
+# Button to manually export
+if st.button("Export visible table to CSV"):
+    out = daily_backup_export(display_df)
+    if out:
+        st.success(f"Exported to {out}")
+    else:
+        st.error("Export failed")
+
+# End
+
+
