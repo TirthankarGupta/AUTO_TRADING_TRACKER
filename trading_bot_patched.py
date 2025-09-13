@@ -1,4 +1,4 @@
-﻿# trading_bot_patched.py
+# trading_bot_patched.py
 import requests
 import pandas as pd
 from requests.exceptions import RequestException

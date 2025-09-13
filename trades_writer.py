@@ -1,4 +1,4 @@
-﻿# trades_writer.py
+# trades_writer.py
 """
 Lightweight writer for executed trades.
 Safe to import from non-Streamlit scripts (e.g., trading_bot.py).

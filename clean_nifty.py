@@ -141,7 +141,8 @@ def main():
     df.to_csv(OUT, index=False)
     print("Saved cleaned CSV to:", OUT)
     print("Clean columns:", list(df.columns))
-    print("First 5 rows:\n", df.head().to_string(index=False))
+    print("First 5 rows:
+", df.head().to_string(index=False))
 
 if __name__ == "__main__":
     main()

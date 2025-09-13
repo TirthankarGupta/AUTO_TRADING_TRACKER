@@ -1,0 +1,3 @@
+trade_id,symbol,quantity,lot_size,entry_price,exit_price,entry_time,exit_time,fees,notes,pnl,cumulative_balance
+1,NIFTY24SEP24700CE,1,75,20,45,2025-09-01 09:17:00,2025-09-01 09:43:00,15,Breakout,1860,101860.0
+2,NIFTY24SEP24800CE,2,75,12,7,2025-09-01 10:05:00,2025-09-01 10:45:00,10,Volatile,-760,101100.0

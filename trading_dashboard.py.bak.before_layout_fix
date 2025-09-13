@@ -1,0 +1,355 @@
+﻿# trading_dashboard.py
+# Updated: header flush top, sidebar readable, order panel mirrors controls
+import streamlit as st
+import pandas as pd
+import numpy as np
+import requests
+from datetime import datetime
+import plotly.graph_objs as go
+
+# ====== CONFIG ======
+API_BASE = "http://127.0.0.1:5001"
+PAGE_TITLE = "Trading Journal"
+LOT_MULTIPLIER = 1
+# Colors
+COLOR_NAVY = "#0B2545"      # deep navy (header & sidebar)
+COLOR_ORANGE = "#FF7A2D"    # accent / action
+COLOR_WHITE = "#FFFFFF"
+COLOR_GREEN = "#17A673"
+COLOR_RED = "#E03E3E"
+
+st.set_page_config(page_title=PAGE_TITLE, layout="wide", initial_sidebar_state="expanded")
+
+# ===== GLOBAL STYLE: remove top gap, style sidebar + button + right panel container =====
+st.markdown(
+    f"""
+<style>
+/* Remove the default top padding / gap so header sits flush to the top */
+.block-container {{
+  padding-top: 0rem !important;
+}}
+/* Ensure the app container itself has no top margin */
+[data-testid="stAppViewContainer"] {{
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+  background: {COLOR_WHITE} ;
+}}
+
+/* Sidebar background and readable white text for labels and input placeholders */
+section[data-testid="stSidebar"] > div:first-child {{
+    background: {COLOR_NAVY} !important;
+    padding: 20px 18px 40px 18px !important;
+    color: {COLOR_WHITE} !important;
+}}
+/* Force all sidebar text to white and inputs visible */
+section[data-testid="stSidebar"] * {{
+    color: {COLOR_WHITE} !important;
+}}
+
+/* Make sidebar input backgrounds faintly translucent so they show up on navy */
+section[data-testid="stSidebar"] input, section[data-testid="stSidebar"] textarea, section[data-testid="stSidebar"] .stTextInput, section[data-testid="stSidebar"] .stSelectbox {{
+    background: rgba(255,255,255,0.06) !important;
+    color: {COLOR_WHITE} !important;
+}}
+
+/* Style the main orange action buttons (global) */
+.stButton>button {{
+    background: {COLOR_ORANGE} !important;
+    color: {COLOR_WHITE} !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    font-weight: 600 !important;
+    border: none !important;
+}}
+
+/* Right panel "mirror" container styling (we will add a wrapper div) */
+.right-panel-mirror {{
+    background: {COLOR_NAVY};
+    color: {COLOR_WHITE};
+    padding: 22px;
+    border-radius: 8px;
+    box-sizing: border-box;
+    /* try to visually mirror sidebar's vertical extent — will scroll if page height small */
+    min-height: calc(100vh - 120px);
+}}
+
+/* Make text inside the right mirror container readable */
+.right-panel-mirror * {{
+    color: {COLOR_WHITE} !important;
+}}
+
+/* small tweaks to charts area: white canvas */
+.plotly-graph-div .main-svg {{
+    background: {COLOR_WHITE};
+}}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+# ===== HEADER (now flush top, navy background) =====
+header_html = f"""
+<div style="width:100%; background:{COLOR_NAVY}; padding:12px 20px; display:flex; align-items:center; box-sizing:border-box;">
+  <div style="display:flex; align-items:center;">
+    <svg width="40" height="40" viewBox="0 0 64 64" style="margin-right:12px;">
+      <circle cx="32" cy="32" r="28" fill="{COLOR_ORANGE}" />
+      <path d="M20 38c6-8 18-10 28-8" fill="none" stroke="{COLOR_WHITE}" stroke-width="2"/>
+      <circle cx="24" cy="24" r="4" fill="{COLOR_WHITE}"/>
+    </svg>
+  </div>
+  <div style="color:{COLOR_WHITE}; font-weight:800; font-size:20px; line-height:1;">
+    Trading Journal
+  </div>
+  <div style="flex:1"></div>
+  <div style="color:{COLOR_WHITE}; font-size:12px; opacity:0.95;">AUTO TRADING TRACKER</div>
+</div>
+"""
+st.markdown(header_html, unsafe_allow_html=True)
+
+# ===== Sidebar controls (left panel) =====
+sidebar = st.sidebar
+sidebar.header("Controls")
+symbol = sidebar.text_input("Symbol (example: NIFTY)", value="NIFTY")
+timeframe = sidebar.selectbox("Timeframe", ["1m","5m","15m"], index=0)
+count = sidebar.number_input("Candles (count)", min_value=20, max_value=1000, value=120, step=10)
+refresh_btn = sidebar.button("Refresh now")
+simulate = sidebar.checkbox("Simulate data (ignore backend)", value=False)
+sidebar.markdown("---")
+sidebar.write(f"Mock backend: {API_BASE}  (use real API when ready)")
+sidebar.caption("Color scheme: Deep Navy Blue, Orange, White, Green")
+
+# ======== Data helpers (unchanged) ========
+@st.cache_data(ttl=5)
+def fetch_quotes(symbol: str, count: int, simulate: bool = False):
+    if simulate:
+        now = pd.Timestamp.now()
+        t = pd.date_range(end=now, periods=count, freq="T")
+        noise = np.random.normal(0, 4, size=count).cumsum()
+        base = 25000 if symbol.upper().startswith("NIFTY") else 20000
+        close = base + noise
+        df = pd.DataFrame({"datetime": t, "open": np.roll(close,1), "high": close + np.abs(np.random.normal(0,2,size=count)),
+                           "low": close - np.abs(np.random.normal(0,2,size=count)), "close": close,
+                           "volume": np.random.randint(100,1000,size=count)})
+        df.loc[df.index[0],"open"] = df.loc[df.index[0],"close"]
+        df = df.set_index("datetime")
+        return df
+    try:
+        resp = requests.get(f"{API_BASE}/quote", params={"symbol": symbol, "count": count}, timeout=6)
+        resp.raise_for_status()
+        payload = resp.json()
+        data = payload.get("data", [])
+        df = pd.DataFrame(data)
+        if "datetime" in df.columns:
+            df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+            df = df.set_index("datetime")
+        if "volume" not in df.columns:
+            vol = (df["close"].pct_change().fillna(0).abs() * 1000 + 200).round().astype(int) if "close" in df.columns else pd.Series([500]*len(df), index=df.index)
+            df["volume"] = vol
+        if "close" not in df.columns and "price" in df.columns:
+            df["close"] = df["price"]
+        if "open" not in df.columns:
+            df["open"] = df["close"].shift(1).fillna(df["close"])
+        if "high" not in df.columns:
+            df["high"] = df[["open","close"]].max(axis=1) + (df["close"] * 0.001).abs()
+        if "low" not in df.columns:
+            df["low"] = df[["open","close"]].min(axis=1) - (df["close"] * 0.001).abs()
+        df = df[["open","high","low","close","volume"]]
+        return df
+    except Exception as e:
+        st.sidebar.error(f"Quote fetch error: {e}")
+        return pd.DataFrame(columns=["open","high","low","close","volume"])
+
+def compute_vwap(df: pd.DataFrame):
+    tp = (df["high"] + df["low"] + df["close"]) / 3.0
+    pv = tp * df["volume"]
+    vwap = pv.cumsum() / df["volume"].cumsum()
+    return vwap
+
+def compute_rsi(series: pd.Series, period: int = 14):
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ma_up = up.rolling(window=period, min_periods=1).mean()
+    ma_down = down.rolling(window=period, min_periods=1).mean()
+    rs = ma_up / (ma_down.replace(0, np.nan))
+    rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.fillna(50)
+    return rsi
+
+# ===== compute indicators =====
+df = fetch_quotes(symbol, count, simulate)
+if not df.empty:
+    df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
+    df["ema21"] = df["close"].ewm(span=21, adjust=False).mean()
+    df["vwap"] = compute_vwap(df)
+    df["rsi"] = compute_rsi(df["close"], period=14)
+
+# ===== main layout: chart + right mirrored order panel =====
+col_chart, col_right = st.columns([3,1], gap="large")
+
+with col_chart:
+    st.markdown(f"### Price chart — {symbol} ({timeframe})", unsafe_allow_html=True)
+    if df.empty:
+        st.info("No price data available. Try 'Simulate data' or change symbol/count.")
+    else:
+        last_price = df["close"].iloc[-1]
+        st.metric("Last price", f"{last_price:,.2f}")
+
+        # Plotly candlestick (white canvas, no gridlines)
+        try:
+            fig = go.Figure(data=[go.Candlestick(
+                x=df.index,
+                open=df["open"],
+                high=df["high"],
+                low=df["low"],
+                close=df["close"],
+                increasing_line_color=COLOR_GREEN,
+                decreasing_line_color=COLOR_RED,
+                showlegend=False
+            )])
+            fig.add_trace(go.Scatter(x=df.index, y=df["ema9"], mode="lines", name="EMA9",
+                                     line=dict(color=COLOR_NAVY, width=1.6)))
+            fig.add_trace(go.Scatter(x=df.index, y=df["ema21"], mode="lines", name="EMA21",
+                                     line=dict(color=COLOR_ORANGE, width=1.6)))
+            fig.add_trace(go.Scatter(x=df.index, y=df["vwap"], mode="lines", name="VWAP",
+                                     line=dict(color="#6C757D", width=1.4, dash="dash")))
+            fig.update_layout(
+                paper_bgcolor=COLOR_WHITE,
+                plot_bgcolor=COLOR_WHITE,
+                margin=dict(l=20, r=20, t=10, b=40),
+                height=560,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            fig.update_xaxes(title_text="Time", showgrid=False, zeroline=False, tickangle=0)
+            fig.update_yaxes(title_text="Price", showgrid=False, zeroline=False)
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"Chart render error: {e}")
+            st.line_chart(df["close"])
+
+with col_right:
+    # Wrap the right column content inside a DIV styled to mirror the left sidebar
+    st.markdown('<div class="right-panel-mirror">', unsafe_allow_html=True)
+
+    st.markdown("## Order panel (CE / PE BUY only)")
+    option_type = st.selectbox("Option Type", ["CE","PE"])
+    atm = st.checkbox("Use ATM strike (auto)", value=True)
+    if not df.empty:
+        last_close = float(df["close"].iloc[-1])
+    else:
+        last_close = None
+
+    if atm and last_close is not None:
+        strike = int(round(last_close))
+        st.markdown(f"<div style='color:{COLOR_WHITE};'>ATM strike chosen: <b style='color:{COLOR_WHITE};'>{strike}</b></div>", unsafe_allow_html=True)
+    else:
+        strike = st.number_input("Strike price", value=25000, step=50)
+
+    qty = st.number_input("Qty / lots", value=1, min_value=1)
+
+    # Place order button (styled orange by global CSS)
+    if st.button("Place BUY Order"):
+        payload = {"symbol": symbol, "type": option_type, "strike": int(strike), "qty": int(qty)}
+        try:
+            r = requests.post(f"{API_BASE}/place_order", json=payload, timeout=5)
+            r.raise_for_status()
+            res = r.json()
+            st.success(f"Order placed: {res.get('order_id')}")
+        except Exception as e:
+            st.error(f"Order failed: {e}")
+            res = {"status": "error", "error": str(e)}
+        if "journal" not in st.session_state:
+            st.session_state.journal = []
+        entry = {
+            "id": res.get("order_id", f"LOCAL-{int(datetime.now().timestamp()*1000)}"),
+            "time": datetime.now().isoformat(),
+            "symbol": symbol,
+            "type": option_type,
+            "strike": int(strike),
+            "qty": int(qty),
+            "entry_price": last_close if last_close is not None else None,
+            "exit_price": None,
+            "status": "open" if res.get("status")=="ok" else "error",
+            "response": res
+        }
+        st.session_state.journal.insert(0, entry)
+
+    st.markdown("---")
+
+    # Orange toggle to show/hide trading log (keeps same orange styling)
+    if "show_log" not in st.session_state:
+        st.session_state.show_log = True
+    if st.button("Show / Hide Trading Log", key="toggle_log"):
+        st.session_state.show_log = not st.session_state.show_log
+
+    if st.session_state.show_log:
+        st.subheader("Trading Journal")
+        if "journal" not in st.session_state:
+            st.session_state.journal = []
+
+        # display journal entries
+        def compute_pnl(entry, current_price):
+            if entry["entry_price"] is None:
+                return None
+            if entry["exit_price"] is not None:
+                pnl = (entry["exit_price"] - entry["entry_price"]) * entry["qty"] * LOT_MULTIPLIER
+            else:
+                pnl = (current_price - entry["entry_price"]) * entry["qty"] * LOT_MULTIPLIER
+            return pnl
+
+        if len(st.session_state.journal) == 0:
+            st.write("No trades in journal yet.")
+        else:
+            rows = []
+            for idx, e in enumerate(st.session_state.journal):
+                current_price = df["close"].iloc[-1] if (not df.empty) else None
+                pnl = compute_pnl(e, current_price) if current_price is not None else None
+                rows.append({
+                    "index": idx,
+                    "id": e["id"],
+                    "time": e["time"],
+                    "symbol": e["symbol"],
+                    "type": e["type"],
+                    "strike": e["strike"],
+                    "qty": e["qty"],
+                    "entry_price": e["entry_price"],
+                    "exit_price": e["exit_price"],
+                    "status": e["status"],
+                    "pnl": round(pnl,2) if pnl is not None else None
+                })
+
+            for r in rows:
+                with st.expander(f"{r['time']} — {r['symbol']} {r['type']} {r['strike']} qty={r['qty']}"):
+                    st.write(pd.DataFrame([r]).drop(columns=["index"]))
+                    if r["status"] == "open":
+                        if st.button(f"Close trade {r['id']}", key=f"close_{r['index']}"):
+                            exit_price = df["close"].iloc[-1] if not df.empty else None
+                            st.session_state.journal[r["index"]]["exit_price"] = exit_price
+                            st.session_state.journal[r["index"]]["status"] = "closed"
+                            st.success(f"Trade {r['id']} closed at {exit_price}")
+                            st.experimental_rerun()
+
+            if st.button("Export Journal CSV"):
+                out_df = pd.DataFrame(st.session_state.journal)
+                csv = out_df.to_csv(index=False)
+                st.download_button("Download CSV", data=csv, file_name=f"trading_journal_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv")
+
+        if not df.empty and st.session_state.journal:
+            total_unreal = 0.0
+            total_real = 0.0
+            for e in st.session_state.journal:
+                if e["entry_price"] is None:
+                    continue
+                if e["exit_price"] is not None:
+                    total_real += (e["exit_price"] - e["entry_price"]) * e["qty"] * LOT_MULTIPLIER
+                else:
+                    total_unreal += (df["close"].iloc[-1] - e["entry_price"]) * e["qty"] * LOT_MULTIPLIER
+            st.markdown("---")
+            st.metric("Unrealized PnL", f"{total_unreal:.2f}", delta=None)
+            st.metric("Realized PnL", f"{total_real:.2f}", delta=None)
+
+    # close wrapper div
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# small footer spacing
+st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)

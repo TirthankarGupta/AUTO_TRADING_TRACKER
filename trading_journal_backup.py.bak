@@ -1,0 +1,328 @@
+# trading_dashboard.py
+"""
+Streamlit trading dashboard — BUY-ONLY with CSV column mapping, no charts.
+Shows per-trade ledger, cumulative balance table (time series), and daily summary.
+Run:
+    streamlit run trading_dashboard.py
+"""
+
+import io
+from datetime import datetime
+import pandas as pd
+import numpy as np
+import streamlit as st
+import pytz
+import difflib
+
+KOLKATA = pytz.timezone("Asia/Kolkata")
+
+# -----------------------
+# Utilities
+# -----------------------
+def parse_datetime(val):
+    if pd.isna(val) or val == "":
+        return pd.NaT
+    try:
+        return pd.to_datetime(val)
+    except Exception:
+        try:
+            return pd.to_datetime(val, utc=True).tz_convert(KOLKATA)
+        except Exception:
+            return pd.NaT
+
+def normalize_columns(df):
+    df = df.copy()
+    df.columns = [c.strip() for c in df.columns]
+    cmap = {c: c.lower() for c in df.columns}
+    df = df.rename(columns=cmap)
+    return df
+
+def fuzzy_detect(col_names, target):
+    target_l = target.lower()
+    col_l = [c.lower() for c in col_names]
+
+    # exact match
+    for i,c in enumerate(col_l):
+        if c == target_l:
+            return col_names[i]
+    # synonyms
+    synonyms = {
+        "trade_id": ["id","tradeid","trade id","ticket"],
+        "symbol": ["instr","instrument","ticker","symbol","contract"],
+        "quantity": ["qty","quantity","lots","size"],
+        "entry_price": ["entry","entryprice","entry price","buy_price","buy price","entry_rate"],
+        "exit_price": ["exit","exitprice","exit price","sell_price","sell price","exit_rate"],
+        "entry_time": ["entry_time","entrytime","time_in","entry timestamp","entry_ts","open_time"],
+        "exit_time": ["exit_time","exittime","time_out","exit timestamp","exit_ts","close_time"],
+        "fees": ["fee","fees","commission","comm","txn_fee","brokerage"]
+    }
+    for syn in synonyms.get(target, []):
+        for i,c in enumerate(col_l):
+            if syn == c:
+                return col_names[i]
+    # substring
+    for i,c in enumerate(col_l):
+        if target_l in c:
+            return col_names[i]
+    # difflib
+    matches = difflib.get_close_matches(target_l, col_l, n=1, cutoff=0.6)
+    if matches:
+        idx = col_l.index(matches[0])
+        return col_names[idx]
+    return None
+
+def compute_pnl_buy(row):
+    try:
+        q = float(row.get("quantity", 0.0))
+        ep = float(row.get("entry_price", np.nan))
+        xp = float(row.get("exit_price", np.nan))
+        if np.isnan(ep) or np.isnan(xp) or q == 0:
+            return pd.Series({"pnl": np.nan, "pct_trade": np.nan})
+        raw = (xp - ep) * q
+        fees = float(row.get("fees", 0.0)) if not pd.isna(row.get("fees", np.nan)) else 0.0
+        pnl = raw - fees
+        entry_value = ep * q
+        pct = np.nan
+        if entry_value != 0:
+            pct = (pnl / entry_value) * 100.0
+        return pd.Series({"pnl": pnl, "pct_trade": pct})
+    except Exception:
+        return pd.Series({"pnl": np.nan, "pct_trade": np.nan})
+
+def compute_cumulative(trades_df, initial_balance):
+    balances = []
+    running = float(initial_balance)
+    for _, r in trades_df.iterrows():
+        if pd.isna(r.get("exit_price")) or pd.isna(r.get("exit_time_parsed")):
+            balances.append(np.nan)
+            continue
+        pnl = r.get("pnl", 0.0) if not pd.isna(r.get("pnl")) else 0.0
+        running = running + pnl
+        balances.append(running)
+    return balances
+
+def daily_summary_from_cumulative(trades_df, initial_balance):
+    summary_rows = []
+    trades = trades_df.copy()
+    trades["exit_day"] = trades["exit_time_parsed"].dt.normalize()
+    unique_days = trades["exit_day"].dropna().sort_values().unique()
+    prev_balance = float(initial_balance)
+    for d in unique_days:
+        day_trades = trades[trades["exit_day"] == d]
+        if day_trades.empty:
+            continue
+        day_pnl = day_trades["pnl"].sum(min_count=1)
+        start_bal = prev_balance
+        last_bal_row = day_trades["cumulative_balance"].dropna()
+        end_bal = last_bal_row.iloc[-1] if not last_bal_row.empty else start_bal
+        pct = np.nan
+        if start_bal != 0:
+            pct = (end_bal - start_bal) / start_bal * 100.0
+        summary_rows.append({
+            "date": pd.to_datetime(d).date(),
+            "start_balance": start_bal,
+            "end_balance": end_bal,
+            "daily_pnl": day_pnl,
+            "daily_pct": pct
+        })
+        prev_balance = end_bal
+    return pd.DataFrame(summary_rows)
+
+def sample_dataframe():
+    data = [
+        [1, "NIFTY24SEP24700CE", 50, 20.0, 45.0, "2025-09-01 09:17:00", "2025-09-01 09:43:00", 15],
+        [2, "NIFTY24SEP24800CE", 40, 12.0, 7.0, "2025-09-01 10:05:00", "2025-09-01 10:45:00", 10],
+        [3, "BANKNIFTY24SEPXYZ", 25, 150.0, 130.0, "2025-09-02 11:00:00", "2025-09-02 11:40:00", 12],
+        [4, "NIFTY24SEP24700CE", 20, 30.0, 50.0, "2025-09-02 13:05:00", "2025-09-02 13:30:00", 8],
+    ]
+    cols = ["trade_id","symbol","quantity","entry_price","exit_price","entry_time","exit_time","fees"]
+    return pd.DataFrame(data, columns=cols)
+
+# -----------------------
+# Streamlit UI
+# -----------------------
+st.set_page_config(page_title="Trading Dashboard (Buy-only) — Table UI", layout="wide")
+st.title("📈 Trading Dashboard — BUY-only (Table UI)")
+st.markdown("Upload your trades CSV, map columns if needed, and view ledger + cumulative-balance time series as a table (no chart).")
+
+col1, col2 = st.columns([2,1])
+with col1:
+    uploaded = st.file_uploader("Upload trades CSV", type=["csv","txt"], accept_multiple_files=False)
+    use_sample = st.checkbox("Use sample trades (instead of upload)", value=False)
+with col2:
+    initial_balance = st.number_input("Initial starting balance (₹)", value=100000.0, step=1000.0, format="%.2f")
+    default_fees = st.number_input("Default per-trade fees (if missing) (₹)", value=0.0, step=1.0, format="%.2f")
+
+# Load dataframe
+if uploaded and not use_sample:
+    try:
+        content = uploaded.read()
+        df_raw = pd.read_csv(io.BytesIO(content))
+        st.success(f"Loaded {len(df_raw)} rows from uploaded CSV.")
+    except Exception as e:
+        st.error(f"Failed to read uploaded CSV: {e}")
+        df_raw = pd.DataFrame()
+elif use_sample or not uploaded:
+    df_raw = sample_dataframe()
+    st.info("Using sample dataset. Replace with your CSV by uploading your file or unchecking 'Use sample trades'.")
+
+if df_raw is None or df_raw.empty:
+    st.warning("No trades loaded yet. Upload a CSV or enable the sample dataset.")
+    st.stop()
+
+original_cols = list(df_raw.columns.astype(str))
+logical_fields = ["trade_id","symbol","quantity","entry_price","exit_price","entry_time","exit_time","fees"]
+
+st.subheader("Column mapping")
+st.markdown("The app attempts to auto-detect your CSV columns. Please review and change any mapping if incorrect.")
+
+# Auto-detect mapping
+auto_map = {}
+for lf in logical_fields:
+    candidate = fuzzy_detect(original_cols, lf)
+    auto_map[lf] = candidate
+
+col_options = ["-- none --"] + original_cols
+mappings = {}
+for lf in logical_fields:
+    default = auto_map.get(lf)
+    if default is None or default not in col_options:
+        default = "-- none --"
+    sel = st.selectbox(f"Map CSV column for '{lf}'", options=col_options, index=col_options.index(default), key=f"map_{lf}")
+    mappings[lf] = None if sel == "-- none --" else sel
+
+if not st.button("Run dashboard with these mappings"):
+    st.info("Click **Run dashboard with these mappings** after confirming the column assignments above.")
+    st.stop()
+
+# Build working dataframe using mappings
+df = pd.DataFrame()
+for lf in logical_fields:
+    mapped = mappings.get(lf)
+    if mapped is not None:
+        df[lf] = df_raw[mapped]
+    else:
+        df[lf] = np.nan
+
+df = normalize_columns(df)
+expected_cols = ["trade_id","symbol","quantity","entry_price","exit_price","entry_time","exit_time","fees"]
+for c in expected_cols:
+    if c not in df.columns:
+        df[c] = np.nan
+
+df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+df["entry_price"] = pd.to_numeric(df["entry_price"], errors="coerce")
+df["exit_price"] = pd.to_numeric(df["exit_price"], errors="coerce")
+df["fees"] = pd.to_numeric(df["fees"], errors="coerce").fillna(default_fees)
+
+df["entry_time_parsed"] = df["entry_time"].apply(parse_datetime)
+df["exit_time_parsed"] = df["exit_time"].apply(parse_datetime)
+
+def ensure_tz(ts):
+    if pd.isna(ts):
+        return ts
+    try:
+        if ts.tzinfo is None:
+            return KOLKATA.localize(ts.to_pydatetime())
+        else:
+            return ts.tz_convert(KOLKATA)
+    except Exception:
+        try:
+            return ts.tz_localize(KOLKATA)
+        except Exception:
+            return ts
+
+df["entry_time_parsed"] = df["entry_time_parsed"].apply(ensure_tz)
+df["exit_time_parsed"] = df["exit_time_parsed"].apply(ensure_tz)
+
+df["entry_time_display"] = df["entry_time_parsed"].dt.tz_convert(KOLKATA).dt.strftime("%Y-%m-%d %H:%M:%S")
+df["exit_time_display"] = df["exit_time_parsed"].dt.tz_convert(KOLKATA).dt.strftime("%Y-%m-%d %H:%M:%S")
+
+pnl_pct = df.apply(compute_pnl_buy, axis=1)
+df["pnl"] = pnl_pct["pnl"]
+df["pct_trade"] = pnl_pct["pct_trade"]
+
+df = df.sort_values(by=["exit_time_parsed"], ascending=True, na_position="last").reset_index(drop=True)
+df["cumulative_balance"] = compute_cumulative(df, initial_balance)
+df["exit_day"] = df["exit_time_parsed"].dt.tz_convert(KOLKATA).dt.normalize()
+
+# -----------------------
+# Displays
+# -----------------------
+st.subheader("Per-trade ledger")
+st.markdown("Columns: trade_id, symbol, quantity, entry_price, exit_price, entry_time, exit_time, fees, pnl, %trade, cumulative_balance")
+display_df = df[[
+    "trade_id","symbol","quantity","entry_price","exit_price",
+    "entry_time_display","exit_time_display","fees","pnl","pct_trade","cumulative_balance"
+]].copy()
+pd.options.display.float_format = '{:,.2f}'.format
+st.dataframe(display_df, use_container_width=True, height=360)
+
+st.subheader("Cumulative balance time series (table)")
+# Build time-series table: only realized rows (with exit_time_parsed)
+ts = df.dropna(subset=["exit_time_parsed"]).copy()
+if ts.empty:
+    st.info("No realized trades to show cumulative time series.")
+else:
+    # Show exit time (localized string) and cumulative balance, plus running pnl and trade reference
+    ts_table = ts[[
+        "exit_time_display","trade_id","symbol","pnl","cumulative_balance"
+    ]].copy()
+    ts_table = ts_table.rename(columns={
+        "exit_time_display": "exit_time",
+        "trade_id": "trade_id",
+        "symbol": "symbol",
+        "pnl": "pnl",
+        "cumulative_balance": "cumulative_balance"
+    })
+    # Ensure ordering
+    ts_table = ts_table.sort_values(by=["exit_time"], ascending=True).reset_index(drop=True)
+    st.dataframe(ts_table, use_container_width=True, height=360)
+
+st.subheader("Daily summary (realized)")
+daily = daily_summary_from_cumulative(df, initial_balance)
+if daily.empty:
+    st.info("No closed trades with exit_time present to build a daily summary.")
+else:
+    st.table(daily.style.format({
+        "start_balance": "{:,.2f}",
+        "end_balance": "{:,.2f}",
+        "daily_pnl": "{:,.2f}",
+        "daily_pct": "{:.2f}%"
+    }))
+
+st.subheader("Quick stats")
+total_realized = df["pnl"].sum(min_count=1)
+num_realized = df.dropna(subset=["exit_price","exit_time_parsed"]).shape[0]
+win_rate = (df["pnl"] > 0).sum() / max(1, (df["pnl"].notna().sum()))
+avg_pct_trade = df["pct_trade"].dropna().mean() if df["pct_trade"].notna().any() else np.nan
+
+st.write(f"Realized P&L: ₹ {total_realized:,.2f}")
+st.write(f"Realized trades: {num_realized}")
+st.write(f"Win rate: {win_rate*100:.2f}%")
+st.write(f"Average % P&L per trade: {avg_pct_trade:.2f}%")
+
+st.subheader("Export")
+csv_buffer = io.StringIO()
+display_df.to_csv(csv_buffer, index=False)
+csv_bytes = csv_buffer.getvalue().encode("utf-8")
+st.download_button("Download ledger CSV", data=csv_bytes, file_name="trades_ledger.csv", mime="text/csv")
+
+try:
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+        display_df.to_excel(writer, sheet_name="ledger", index=False)
+        if not daily.empty:
+            daily.to_excel(writer, sheet_name="daily_summary", index=False)
+        writer.save()
+    st.download_button(
+        "Download Excel report",
+        data=excel_buffer.getvalue(),
+        file_name="trading_report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+except Exception as e:
+    st.warning(f"Excel export not available: {e}")
+
+st.markdown("---")
+st.caption("This dashboard treats every trade as a BUY (LONG). Open trades (no exit_price or exit_time) are shown but do not affect realized cumulative balance.")

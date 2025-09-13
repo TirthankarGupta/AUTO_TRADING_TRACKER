@@ -1,0 +1,160 @@
+﻿# trading_dashboard.py
+import streamlit as st
+import pandas as pd
+import requests
+from datetime import datetime
+import plotly.graph_objs as go
+
+API_BASE = "http://127.0.0.1:5001"
+
+st.set_page_config(page_title="AUTO TRADING TRACKER", layout="wide")
+st.title("AUTO TRADING TRACKER — Dashboard")
+
+# --- Sidebar: controls ---
+st.sidebar.header("Controls")
+symbol = st.sidebar.text_input("Symbol (example: NIFTY)", value="NIFTY")
+timeframe = st.sidebar.selectbox("Timeframe", ["1m", "5m", "15m"], index=0)
+count = st.sidebar.number_input("Candles (count)", min_value=10, max_value=1000, value=120)
+refresh = st.sidebar.button("Refresh now")
+use_simulate = st.sidebar.checkbox("Simulate data (ignore backend)", value=False)
+st.sidebar.markdown("---")
+st.sidebar.caption("Mock backend: http://127.0.0.1:5001 (use real API when ready)")
+
+# helper: fetch quotes from API
+@st.cache_data(ttl=5)
+def fetch_quotes(symbol: str, count: int):
+    if use_simulate:
+        # simple simulated series (random walk) if you choose simulate
+        import numpy as np
+        now = pd.Timestamp.now()
+        t = pd.date_range(end=now, periods=count, freq="T")
+        noise = np.random.normal(0, 4, size=count).cumsum()
+        base = 25000 if symbol.upper().startswith("NIFTY") else 20000
+        price = base + noise
+        df = pd.DataFrame({"datetime": t, "close": price}).set_index("datetime")
+        df["open"] = df["close"].shift(1).fillna(df["close"])
+        df["high"] = df[["open","close"]].max(axis=1) + (df["close"] * 0.001).abs()
+        df["low"]  = df[["open","close"]].min(axis=1) - (df["close"] * 0.001).abs()
+        return df
+    try:
+        r = requests.get(f"{API_BASE}/quote", params={"symbol": symbol, "count": count}, timeout=6)
+        r.raise_for_status()
+        payload = r.json()
+        data = payload.get("data", [])
+        df = pd.DataFrame(data)
+        if "datetime" in df.columns:
+            df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+            df = df.set_index("datetime")
+        # normalize columns
+        if "close" not in df.columns and "price" in df.columns:
+            df["close"] = df["price"]
+        if "close" in df.columns:
+            if "open" not in df.columns:
+                df["open"] = df["close"].shift(1).fillna(df["close"])
+            if "high" not in df.columns:
+                df["high"] = df[["open","close"]].max(axis=1) + (df["close"] * 0.001).abs()
+            if "low" not in df.columns:
+                df["low"] = df[["open","close"]].min(axis=1) - (df["close"] * 0.001).abs()
+            df = df[["open","high","low","close"]]
+        else:
+            # fallback: last numeric column as close
+            numeric = df.select_dtypes(include="number")
+            if not numeric.empty:
+                df["close"] = numeric.iloc[:, 0]
+                df["open"] = df["close"].shift(1).fillna(df["close"])
+                df["high"] = df[["open","close"]].max(axis=1) + (df["close"] * 0.001).abs()
+                df["low"] = df[["open","close"]].min(axis=1) - (df["close"] * 0.001).abs()
+                df = df[["open","high","low","close"]]
+            else:
+                return pd.DataFrame(columns=["open","high","low","close"])
+        return df
+    except Exception as e:
+        st.sidebar.error(f"Quote fetch error: {e}")
+        return pd.DataFrame(columns=["open","high","low","close"])
+
+# fetch data
+df = fetch_quotes(symbol, count)
+
+# compute indicators (EMA/SMA)
+if not df.empty:
+    df["sma_20"] = df["close"].rolling(window=20, min_periods=1).mean()
+    df["sma_50"] = df["close"].rolling(window=50, min_periods=1).mean()
+    df["ema_20"] = df["close"].ewm(span=20, adjust=False).mean()
+else:
+    df["sma_20"] = pd.Series(dtype=float)
+    df["sma_50"] = pd.Series(dtype=float)
+    df["ema_20"] = pd.Series(dtype=float)
+
+# --- Main layout: left (chart) / right (orders & log) ---
+col_chart, col_right = st.columns([3, 1])
+
+with col_chart:
+    st.subheader(f"Price chart — {symbol} ({timeframe})")
+    if df.empty:
+        st.info("No data available. Try Refresh or enable Simulate.")
+    else:
+        last_price = df["close"].iloc[-1]
+        st.metric("Last price", f"{last_price:.2f}")
+        # Plot with Plotly for overlays
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df["close"], mode="lines", name="close"))
+        if "ema_20" in df.columns:
+            fig.add_trace(go.Scatter(x=df.index, y=df["ema_20"], mode="lines", name="EMA20"))
+        if "sma_50" in df.columns:
+            fig.add_trace(go.Scatter(x=df.index, y=df["sma_50"], mode="lines", name="SMA50"))
+        fig.update_layout(margin=dict(l=20,r=20,t=30,b=20), height=450, legend=dict(orientation="h"))
+        st.plotly_chart(fig, use_container_width=True)
+
+    # avoid/entry zone example (displayed text only)
+    st.markdown("**Entry/Avoid guidance (demo):**")
+    if not df.empty:
+        st.write(f"- CE Buy above: **{(df['sma_20'].iloc[-1] if not df['sma_20'].isna().all() else last_price):.2f}**")
+        st.write(f"- PE Buy below: **{(df['sma_20'].iloc[-1] if not df['sma_20'].isna().all() else last_price):.2f}**")
+        st.write("- Avoid zones: large gaps from SMA50 and last high/low (visual).")
+    else:
+        st.write("- No guidance: no data")
+
+with col_right:
+    st.subheader("Order panel (CE / PE BUY only)")
+    option_type = st.selectbox("Option Type", ["CE", "PE"])
+    atm_chk = st.checkbox("Use ATM strike (auto)", value=True)
+    if not df.empty:
+        last_close = float(df["close"].iloc[-1])
+    else:
+        last_close = None
+
+    if atm_chk and last_close is not None:
+        strike = int(round(last_close))
+        st.write(f"ATM strike chosen: **{strike}**")
+    else:
+        strike = st.number_input("Strike price", value=25000, step=50)
+
+    qty = st.number_input("Qty / lots", value=1, min_value=1)
+    if st.button("Place BUY Order"):
+        payload = {"symbol": symbol, "type": option_type, "strike": int(strike), "qty": int(qty)}
+        try:
+            r = requests.post(f"{API_BASE}/place_order", json=payload, timeout=5)
+            r.raise_for_status()
+            resjson = r.json()
+            st.success(f"Order placed: {resjson.get('order_id')}")
+            # append to session log
+            if "order_log" not in st.session_state:
+                st.session_state.order_log = []
+            st.session_state.order_log.insert(0, {"time": datetime.now().isoformat(), "payload": payload, "response": resjson})
+        except Exception as e:
+            st.error(f"Order failed: {e}")
+            if "order_log" not in st.session_state:
+                st.session_state.order_log = []
+            st.session_state.order_log.insert(0, {"time": datetime.now().isoformat(), "payload": payload, "response": str(e)})
+
+    st.markdown("---")
+    st.subheader("Activity log")
+    if "order_log" not in st.session_state or not st.session_state.order_log:
+        st.write("No activity yet.")
+    else:
+        for item in st.session_state.order_log[:20]:
+            st.write(f"{item['time']} — {item['payload']} — {item['response']}")
+
+# Footer
+st.markdown("---")
+st.caption("Demo dashboard (mock backend). When ready, switch API_BASE to your SmartAPI URL and secure credentials via .env.")

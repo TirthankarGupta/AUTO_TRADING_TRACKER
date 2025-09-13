@@ -107,7 +107,8 @@ def plot_equity(df: pd.DataFrame, out_dir: str) -> str:
                 y = df.at[idx, "cum_pnl"]
                 val = df.at[idx, "pnl"]
                 ax.scatter([x], [y], s=60, color=color, zorder=5, edgecolor="k")
-                ax.annotate(f"{label}\nPNL: {val:.2f}",
+                ax.annotate(f"{label}
+PNL: {val:.2f}",
                             xy=(x, y), xytext=(10, 8 if color=="green" else -18),
                             textcoords="offset points", fontsize=9,
                             bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.8),
@@ -190,7 +191,8 @@ def print_summary(df: pd.DataFrame) -> None:
     win_rate = float(len(wins) / total_trades) if total_trades > 0 else 0.0
     max_dd = int(df["drawdown"].min()) if "drawdown" in df.columns else 0
 
-    print("\nBacktest Summary:")
+    print("
+Backtest Summary:")
     print(f"  total_trades: {total_trades}")
     print(f"  total_pnl: {total_pnl:.6f}")
     print(f"  avg_pnl: {avg_pnl:.6f}")
@@ -224,7 +226,8 @@ def main():
     except Exception as e:
         print("Warning: pnl distribution plot failed:", e)
 
-    print("\nAll done. Plots saved under:", OUT_DIR)
+    print("
+All done. Plots saved under:", OUT_DIR)
 
 if __name__ == "__main__":
     main()

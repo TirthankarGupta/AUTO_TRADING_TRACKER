@@ -1,0 +1,14 @@
+metric,value
+start_date,2025-09-04 03:47:00+00:00
+end_date,2025-09-10 09:59:00+00:00
+trades,52
+total_pnl,18.357421875
+avg_pnl,0.35302734375
+median_pnl,-7.9248046875
+std_pnl,31.798551533645742
+wins,12
+losses,40
+win_rate,0.23076923076923078
+max_drawdown,-165.548828125
+largest_win,137.048828125
+largest_loss,-39.55078125

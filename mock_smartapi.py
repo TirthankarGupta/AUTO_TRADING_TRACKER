@@ -1,4 +1,4 @@
-﻿# mock_smartapi.py
+# mock_smartapi.py
 """
 Mock SmartAPI server — guaranteed CE/PE signals
 GET /quote?symbol=X&count=N&force=ce|pe

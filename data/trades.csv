@@ -1,0 +1,2 @@
+date,symbol,type,entry_time,entry_price,exit_time,exit_price,qty,pnl,cumulative_balance,notes
+2025-09-07,NIFTY,CE,09:21,152.5,09:47,178.2,75,1927.5,1927.5,test trade

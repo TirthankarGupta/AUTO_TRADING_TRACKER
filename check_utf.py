@@ -1,4 +1,4 @@
-﻿import glob, sys
+import glob, sys
 def check(path):
     try:
         open(path,'r', encoding='utf-8').read()

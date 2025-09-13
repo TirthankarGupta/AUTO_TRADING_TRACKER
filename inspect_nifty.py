@@ -67,11 +67,16 @@ if "datetime" in df.columns:
     df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
 
 print("COLUMNS:", df.columns.tolist())
-print("\nDTYPES:\n", df.dtypes)
-print("\nHEAD (first 6 rows):\n", df.head(6).to_string(index=False))
+print("
+DTYPES:
+", df.dtypes)
+print("
+HEAD (first 6 rows):
+", df.head(6).to_string(index=False))
 
 # Quick stats about NaNs in numeric cols
-print("\nNaN counts in OHLCV:")
+print("
+NaN counts in OHLCV:")
 for c in ["open","high","low","close","volume"]:
     print(f" {c}: {df[c].isna().sum() if c in df.columns else 'MISSING'}")
 
@@ -80,6 +85,8 @@ if "close" in df.columns and df["close"].notna().sum() > 10:
     ema9 = df["close"].ewm(span=9, adjust=False).mean()
     ema21 = df["close"].ewm(span=21, adjust=False).mean()
     crosses = ((ema9 > ema21) & (ema9.shift(1) <= ema21.shift(1))).sum()
-    print("\nEMA9>EMA21 crossups count:", crosses)
+    print("
+EMA9>EMA21 crossups count:", crosses)
 else:
-    print("\nNot enough numeric 'close' data to compute EMA crossovers.")
+    print("
+Not enough numeric 'close' data to compute EMA crossovers.")

@@ -1,0 +1,13 @@
+﻿version: '3.8'
+services:
+  web:
+    build: .
+    container_name: auto_trading_web
+    command: streamlit run trading_dashboard.py --server.port 8501 --server.address 0.0.0.0
+    volumes:
+      - ./:/app
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    restart: unless-stopped

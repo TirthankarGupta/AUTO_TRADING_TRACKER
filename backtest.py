@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-backtest.py — revised: EMA crossover primary, VWAP/RSI supportive (not blocking)
+backtest.py â€” revised: EMA crossover primary, VWAP/RSI supportive (not blocking)
 
 Usage:
     python backtest.py <csv_path>
@@ -305,12 +305,14 @@ def main(argv=None):
     try:
         df = read_csv_robust(csv_path)
         results, summary, outp = run_backtest(df, tp=0.005, sl=0.0025, vol_window=20, out_dir="data")
-        print("\nBacktest Summary:")
+        print("
+Backtest Summary:")
         for k,v in summary.items():
             print(f"  {k}: {v}")
         print(f"Saved trade results to: {outp}")
         if not results.empty:
-            print("\nSample trades:")
+            print("
+Sample trades:")
             print(results.head(10).to_string(index=False))
     except Exception as exc:
         print("Error during backtest:", str(exc))

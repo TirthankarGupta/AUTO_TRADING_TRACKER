@@ -1,0 +1,233 @@
+﻿# trading_journal.py — clean baseline (auto-loaded trades.csv, stats, ledger, optional CSS)
+"""
+Trading Journal — clean baseline
+- Loads trades.csv if present, otherwise uses a small sample.
+- Shows balance / trade stats and an editable ledger view.
+- Keeps styling separate via journal_style.css (optional).
+Run:
+    streamlit run trading_journal.py
+"""
+import io
+from datetime import datetime
+import pandas as pd
+import numpy as np
+import streamlit as st
+import pytz
+import os
+
+# Page config
+st.set_page_config(page_title="Trading Journal", layout="wide", initial_sidebar_state="collapsed")
+
+# Attempt to load external CSS (optional file: journal_style.css)
+try:
+    css_path = "journal_style.css"
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as __f:
+            st.markdown(f"<style>{__f.read()}</style>", unsafe_allow_html=True)
+except Exception as _e:
+    # non-fatal: styling is optional
+    pass
+
+KOLKATA = pytz.timezone("Asia/Kolkata")
+
+# ------------------------
+# Helpers
+# ------------------------
+def parse_datetime(val):
+    if pd.isna(val) or (isinstance(val, str) and val.strip() == ""):
+        return pd.NaT
+    try:
+        ts = pd.to_datetime(val, errors="coerce")
+        if pd.isna(ts):
+            return pd.NaT
+        # localize naive -> Kolkata, else convert
+        if getattr(ts, "tzinfo", None) is None and getattr(ts, "tz", None) is None:
+            try:
+                return ts.tz_localize(KOLKATA)
+            except Exception:
+                try:
+                    return KOLKATA.localize(ts.to_pydatetime())
+                except Exception:
+                    return pd.NaT
+        else:
+            try:
+                return ts.tz_convert(KOLKATA)
+            except Exception:
+                return ts
+    except Exception:
+        return pd.NaT
+
+def ensure_columns(df):
+    required = [
+        "trade_id", "symbol", "quantity",
+        "lot_size", "entry_price", "exit_price",
+        "entry_time", "exit_time",
+        "fees", "notes"
+    ]
+    for c in required:
+        if c not in df.columns:
+            df[c] = np.nan
+    return df
+
+def compute_pnl_units(row, default_lot_size):
+    """Compute PnL using units = quantity (lots) * lot_size (units/lot)."""
+    try:
+        lots = float(row.get("quantity", 0.0))
+        lot_size = float(row.get("lot_size", default_lot_size)) if not pd.isna(row.get("lot_size", np.nan)) else float(default_lot_size)
+        units = lots * lot_size
+        ep = float(row.get("entry_price", np.nan))
+        xp = float(row.get("exit_price", np.nan))
+        fees = float(row.get("fees", 0.0)) if not pd.isna(row.get("fees", np.nan)) else 0.0
+        if np.isnan(ep) or np.isnan(xp) or units == 0:
+            return np.nan
+        return (xp - ep) * units - fees
+    except Exception:
+        return np.nan
+
+# ------------------------
+# Sample data (safe)
+# ------------------------
+def sample_data():
+    return pd.DataFrame([
+        {"trade_id":1,"symbol":"NIFTY24SEP24700CE","quantity":1,"lot_size":75,"entry_price":20.0,"exit_price":45.0,"entry_time":"2025-09-01 09:17:00","exit_time":"2025-09-01 09:43:00","fees":15,"notes":"Breakout"},
+        {"trade_id":2,"symbol":"NIFTY24SEP24800CE","quantity":2,"lot_size":75,"entry_price":12.0,"exit_price":7.0,"entry_time":"2025-09-01 10:05:00","exit_time":"2025-09-01 10:45:00","fees":10,"notes":"Volatile"},
+        {"trade_id":3,"symbol":"BANKNIFTY24SEPXYZ","quantity":1,"lot_size":25,"entry_price":150.0,"exit_price":130.0,"entry_time":"2025-09-02 11:00:00","exit_time":"2025-09-02 11:40:00","fees":12,"notes":""},
+        {"trade_id":4,"symbol":"NIFTY24SEP24700CE","quantity":2,"lot_size":75,"entry_price":30.0,"exit_price":50.0,"entry_time":"2025-09-02 13:05:00","exit_time":"2025-09-02 13:30:00","fees":8,"notes":"Momentum"}
+    ])
+
+# ------------------------
+# Streamlit UI
+# ------------------------
+st.title("Trading Journal — BUY-only (lot_size & editable notes)")
+
+col1, col2 = st.columns([3,1])
+with col1:
+    uploaded = st.file_uploader("Upload trades CSV (headers: trade_id,symbol,quantity,entry_price,exit_price,entry_time,exit_time,fees,notes,lot_size optional)", type=["csv","txt"], accept_multiple_files=False)
+    use_sample = st.checkbox("Use sample dataset if no upload", value=False)
+with col2:
+    initial_balance = st.number_input("Initial starting balance (₹)", value=100000.0, step=1000.0, format="%.2f")
+    default_fees = st.number_input("Default per-trade fees (₹) if missing", value=0.0, step=1.0, format="%.2f")
+    global_lot_size = st.number_input("Default lot size (units per lot)", value=75, step=1, help="Contract multiplier (e.g. 75 for NIFTY options)")
+
+# ------------------------
+# Load data
+# ------------------------
+df_raw = None
+trades_path = "trades.csv"
+if os.path.exists(trades_path):
+    try:
+        df_raw = pd.read_csv(trades_path)
+        st.success(f"Loaded {len(df_raw)} rows from trades.csv")
+    except Exception as e:
+        st.error(f"Failed to read trades.csv: {e}")
+        df_raw = None
+
+# fallback to uploader or sample
+if df_raw is None:
+    if uploaded:
+        try:
+            df_raw = pd.read_csv(uploaded)
+            st.success(f"Loaded {len(df_raw)} rows from uploaded CSV.")
+        except Exception as e:
+            st.error(f"Failed to read uploaded CSV: {e}")
+            df_raw = None
+    if df_raw is None:
+        if use_sample or not uploaded:
+            df_raw = sample_data()
+            st.info("Using sample dataset. Upload your CSV to use real trades.")
+
+if df_raw is None or df_raw.empty:
+    st.warning("No trades loaded. Please upload trades.csv or use sample.")
+    st.stop()
+
+# Normalize header names to lower-case keys
+df = df_raw.copy()
+df.columns = [str(c).strip().lower() for c in df.columns]
+
+# Ensure important columns exist
+df = ensure_columns(df)
+
+# Coerce numeric columns
+df["quantity"] = pd.to_numeric(df.get("quantity", np.nan), errors="coerce").fillna(0)
+df["lot_size"] = pd.to_numeric(df.get("lot_size", np.nan), errors="coerce").fillna(global_lot_size)
+df["entry_price"] = pd.to_numeric(df.get("entry_price", np.nan), errors="coerce")
+df["exit_price"] = pd.to_numeric(df.get("exit_price", np.nan), errors="coerce")
+df["fees"] = pd.to_numeric(df.get("fees", np.nan), errors="coerce").fillna(default_fees)
+df["notes"] = df.get("notes", "").astype(str)
+
+# Parse datetimes
+df["entry_time_parsed"] = df["entry_time"].apply(parse_datetime)
+df["exit_time_parsed"]  = df["exit_time"].apply(parse_datetime)
+
+# PnL using lot_size (units = quantity * lot_size)
+df["pnl"] = df.apply(lambda r: compute_pnl_units(r, global_lot_size), axis=1)
+
+# Sort by exit_time_parsed so realized trades are chronological
+df = df.sort_values(by=["exit_time_parsed"], ascending=True, na_position="last").reset_index(drop=True)
+
+# Cumulative balance (realized only)
+running = float(initial_balance)
+cumulatives = []
+for _, row in df.iterrows():
+    if pd.notna(row.get("exit_price")) and pd.notna(row.get("exit_time_parsed")):
+        pnl = 0.0 if pd.isna(row.get("pnl")) else float(row.get("pnl"))
+        running += pnl
+        cumulatives.append(running)
+    else:
+        cumulatives.append(running)
+df["cumulative_balance"] = cumulatives
+
+# Day & Date based on exit_time_parsed (for closed trades)
+df["day"]  = df["exit_time_parsed"].dt.tz_convert(KOLKATA).dt.strftime("%A").fillna("")
+df["date"] = df["exit_time_parsed"].dt.tz_convert(KOLKATA).dt.date
+
+# ------------------------
+# Stats panel
+# ------------------------
+st.markdown("### 📊 Balance Summary & Trade Stats")
+col_a, col_b, col_c, col_d = st.columns(4)
+with col_a:
+    st.metric("Total Trades", len(df))
+with col_b:
+    wins = int((df["pnl"] > 0).sum())
+    losses = int((df["pnl"] < 0).sum())
+    st.metric("Wins / Losses", f"{wins} / {losses}")
+with col_c:
+    total_pnl = float(df["pnl"].sum() if "pnl" in df.columns else 0.0)
+    st.metric("Net PnL (₹)", f"{total_pnl:,.2f}")
+with col_d:
+    win_rate = (wins / len(df) * 100) if len(df) > 0 else 0.0
+    st.metric("Win Rate %", f"{win_rate:.1f}%")
+
+# ------------------------
+# Per-trade ledger (display)
+# ------------------------
+st.subheader("Per-trade ledger (editable Notes)")
+display_cols = ["day", "date", "entry_time_parsed", "exit_time_parsed", "symbol", "quantity", "lot_size", "entry_price", "exit_price", "pnl", "cumulative_balance", "notes"]
+display_cols = [c for c in display_cols if c in df.columns]
+df_display = df[display_cols].copy()
+# rename parsed cols for display
+if "entry_time_parsed" in df_display.columns:
+    df_display = df_display.rename(columns={"entry_time_parsed":"entry_time_display","exit_time_parsed":"exit_time_display"})
+# show with stretch width
+st.dataframe(df_display, width='stretch', use_container_width=False)
+
+# ------------------------
+# Optional: export utilities (safe)
+# ------------------------
+def export_csv(df_export, prefix="export"):
+    try:
+        os.makedirs("exports", exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csvp = os.path.join("exports", f"{prefix}_{ts}.csv")
+        df_export.to_csv(csvp, index=False)
+        return csvp
+    except Exception as e:
+        return None
+
+if st.button("Export visible table to CSV"):
+    result = export_csv(df_display, prefix="trading_journal")
+    if result:
+        st.success(f"Exported to {result}")
+    else:
+        st.error("Export failed")

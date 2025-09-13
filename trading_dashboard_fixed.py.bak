@@ -1,0 +1,6 @@
+# backup current file first (safe)
+Copy-Item .\trading_dashboard.py .\trading_dashboard.py.bak -Force
+
+# save new file (or open in editor and paste below)
+# then run:
+streamlit run .\trading_dashboard_fixed.py --server.port=8502 --logger.level=debug

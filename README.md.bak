@@ -1,0 +1,7 @@
+# AUTO_TRADING_TRACKER
+
+Automated trading research — backtesting pipeline, journal and visualizations.
+
+**Last Progress Log:** _Not recorded yet_
+
+(Use `./log_progress.ps1 "notes..."` to append a session to `journal/Progress_Log.md`. Then run `./update_readme.ps1` to update this README and push to GitHub.)

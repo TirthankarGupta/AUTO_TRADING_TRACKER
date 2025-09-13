@@ -1,4 +1,4 @@
-﻿import os, json, requests
+import os, json, requests
 from dotenv import load_dotenv
 
 load_dotenv()

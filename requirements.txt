@@ -3,7 +3,7 @@ numpy
 streamlit
 matplotlib
 seaborn
-pandas_ta
+pandas-ta-openbb
 smartapi-python
 notebook
 jupyterlab

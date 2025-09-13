@@ -1,0 +1,93 @@
+﻿/* journal_style.css — updated (header flush-top + navy sidebar + visual tweaks) */
+
+/* Remove top gap and flush page header to very top */
+.reportview-container .main .block-container,
+.stApp > div {
+    padding-top: 0rem !important;
+}
+
+/* Big header bar style */
+h1 {
+    font-size: 28px !important;
+    color: #ffffff !important;
+    background-color: #0b1d3a !important; /* deep navy */
+    text-align: left !important;
+    margin-top: 0px !important;   /* flush to top */
+    margin-bottom: 10px !important;
+    padding: 12px 18px !important;
+    border-radius: 6px !important;
+    box-shadow: 0 2px 6px rgba(11,29,58,0.15) !important;
+}
+
+/* small AT logo badge — keep orange look but professional rounded square */
+.at-badge {
+    display:inline-block;
+    width:40px;height:40px;
+    line-height:40px;
+    text-align:center;
+    border-radius:8px;
+    background:#f39c12; /* orange */
+    color:#081827;
+    font-weight:700;
+    margin-right:12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+}
+
+/* Make progress bar green (success) */
+[data-testid="stProgress"] > div div div {
+    background-color: #2ecc71 !important;
+}
+
+/* PnL badge */
+.pnl-badge {
+    background: linear-gradient(0deg,#ff8c00,#ff7a00) !important;
+    color: white !important;
+    padding:8px 12px !important;
+    border-radius:8px !important;
+    box-shadow:0 4px 10px rgba(0,0,0,0.12) !important;
+    display:inline-block !important;
+    font-weight:700 !important;
+}
+
+/* Sidebar (controls) — deep navy background and white text */
+section[data-testid="stSidebar"] {
+    background-color: #0b1d3a !important; /* same deep navy */
+    color: #ffffff !important;
+    padding-top: 18px !important;
+}
+
+/* Force all text inside sidebar to white for visibility */
+section[data-testid="stSidebar"] * {
+    color: #ffffff !important;
+}
+
+/* Make input boxes on sidebar slightly lighter so they remain readable */
+section[data-testid="stSidebar"] .stNumberInput, 
+section[data-testid="stSidebar"] input,
+section[data-testid="stSidebar"] .css-1y4p8pa {
+    background: #f7f9fb !important;
+    color: #081827 !important;
+    border-radius:6px !important;
+}
+
+/* Remove grid lines from plotly / hide default grid lines visually */
+.plotly .gridlines, .plotly .xgrid, .plotly .ygrid { display:none !important; }
+svg .cartesianlayer .x .tick line, svg .cartesianlayer .y .tick line { stroke-width:0 !important; }
+
+/* Legend & axis small font sizing */
+.plotly .axis text, .plotly .legend text { font-size:11px !important; color:#333 !important; }
+
+/* Small tweak to table headers: initial caps and spacing */
+[data-testid="stDataFrame"] thead th {
+    text-transform: none !important;
+    font-weight:600 !important;
+}
+
+/* Make the dataframe container stretch nicely */
+[data-testid="stDataFrame"] { padding-bottom: 18px !important; }
+
+/* Minor responsive fixes */
+@media (max-width: 900px) {
+    h1 { font-size: 22px !important; padding:10px !important; }
+    .at-badge { width:34px;height:34px;line-height:34px; }
+}

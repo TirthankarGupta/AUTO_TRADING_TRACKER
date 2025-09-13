@@ -1,6 +1,7 @@
-﻿# mock_api.py
+# mock_api.py
 from flask import Flask, request, jsonify
 import time
+import math
 from datetime import datetime, timedelta
 import random
 
@@ -25,35 +26,37 @@ def place_order():
 
 @app.route("/quote", methods=["GET"])
 def quote():
+    """
+    GET /quote?symbol=NIFTY&count=100&force=false
+    Returns a simple time-series of price points (timestamp, price).
+    """
     symbol = request.args.get("symbol", "NIFTY")
     count = int(request.args.get("count", "100"))
+    # optional parameter 'force' for compatibility
+    force = request.args.get("force", "false").lower() in ("1","true","yes")
+
+    # generate mock price series ending now, 1-minute spacing
     now = datetime.now()
     base = 25000 if symbol.upper().startswith("NIFTY") else 20000
+    # small deterministic-ish seed per symbol so repeated calls look similar
     random.seed(hash(symbol) & 0xffffffff)
-    candles = []
+    prices = []
     price = base + random.uniform(-10, 10)
     for i in range(count):
+        # simulate minute-by-minute walk
         delta = random.gauss(0, 4)
-        new_close = max(1, price + delta)
-        open_p = price
-        high_p = max(open_p, new_close) + abs(random.gauss(0, 1))
-        low_p = min(open_p, new_close) - abs(random.gauss(0, 1))
+        price = max(1, price + delta)
         ts = (now - timedelta(minutes=(count - 1 - i))).isoformat()
-        candles.append({
-            "datetime": ts,
-            "open": round(open_p,2),
-            "high": round(high_p,2),
-            "low": round(low_p,2),
-            "close": round(new_close,2)
-        })
-        price = new_close
+        prices.append({"datetime": ts, "price": round(price, 2)})
 
     return jsonify({
         "status": "ok",
         "symbol": symbol,
         "count": count,
-        "data": candles
+        "force": force,
+        "data": prices
     })
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5001, debug=True)
+

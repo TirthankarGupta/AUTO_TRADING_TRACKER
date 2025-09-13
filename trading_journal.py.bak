@@ -1,0 +1,342 @@
+﻿# trading_journal.py — Updated (header flush, navy sidebar, SVG abstract logo, candles+indicators, alerts, backups)
+"""
+Trading Journal — Updated consolidated app
+Run: streamlit run trading_journal.py
+"""
+import os, io, math
+from datetime import datetime
+import pandas as pd
+import numpy as np
+import streamlit as st
+import pytz
+import plotly.graph_objects as go
+
+# Page config
+st.set_page_config(page_title="Trading Journal", layout="wide", initial_sidebar_state="expanded")
+KOLKATA = pytz.timezone("Asia/Kolkata")
+
+# ------------------------
+# Helpers
+# ------------------------
+def ema(series: pd.Series, span: int) -> pd.Series:
+    return series.ewm(span=span, adjust=False).mean()
+
+def rsi(series: pd.Series, length: int = 14) -> pd.Series:
+    delta = series.diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ma_up = up.ewm(alpha=1/length, adjust=False).mean()
+    ma_down = down.ewm(alpha=1/length, adjust=False).mean()
+    rs = ma_up / (ma_down.replace(0, 1e-10))
+    return 100 - (100 / (1 + rs))
+
+def tz_localize_series(s: pd.Series, tz):
+    s2 = pd.to_datetime(s, errors="coerce")
+    # if tz-aware convert, else localize
+    try:
+        if s2.dt.tz is None:
+            return s2.dt.tz_localize(tz)
+        return s2.dt.tz_convert(tz)
+    except Exception:
+        # last-resort: naive -> localize
+        try:
+            return s2.dt.tz_localize(tz, ambiguous='NaT', nonexistent='shift_forward')
+        except Exception:
+            return s2
+
+def compute_pnl_units(row, default_lot_size):
+    try:
+        lots = float(row.get("quantity", 0.0))
+        lot_size = float(row.get("lot_size", default_lot_size)) if not pd.isna(row.get("lot_size", np.nan)) else float(default_lot_size)
+        units = lots * lot_size
+        ep = float(row.get("entry_price", np.nan))
+        xp = float(row.get("exit_price", np.nan))
+        fees = float(row.get("fees", 0.0)) if not pd.isna(row.get("fees", np.nan)) else 0.0
+        if np.isnan(ep) or np.isnan(xp) or units == 0:
+            return np.nan
+        return (xp - ep) * units - fees
+    except Exception:
+        return np.nan
+
+# ------------------------
+# Load optional CSS
+# ------------------------
+css_path = "journal_style.css"
+if os.path.exists(css_path):
+    try:
+        with open(css_path,"r",encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except Exception:
+        pass
+
+# ------------------------
+# Sidebar UI
+# ------------------------
+with st.sidebar:
+    st.markdown("<div style='color:#ffffff;font-weight:700;font-size:16px;padding-bottom:6px'>Controls</div>", unsafe_allow_html=True)
+    initial_balance = st.number_input("Initial starting balance (₹)", value=100000.0, step=1000.0, format="%.2f")
+    default_fees = st.number_input("Default per-trade fees (₹) if missing", value=0.0, step=1.0, format="%.2f")
+    global_lot_size = st.number_input("Default lot size (units per lot)", value=75, step=1)
+    show_candles = st.checkbox("Show candles (mock OHLC)", value=True)
+    st.markdown("### Force Signal (testing)", unsafe_allow_html=True)
+    force_mode = st.radio("", options=["Auto","BUY_CE","BUY_PE"], index=0)
+    st.markdown("---")
+    max_trades = st.number_input("Discipline: Max trades/day", value=10, step=1)
+    daily_target = st.number_input("Daily profit target (₹)", value=5000.0, step=100.0)
+    daily_stop = st.number_input("Daily stop-loss (₹)", value=-5000.0, step=100.0)
+    st.markdown("---")
+    if st.button("Force day-end export"):
+        st.session_state["_force_export"] = True
+
+# ------------------------
+# Data load (trades.csv) or sample
+# ------------------------
+trades_path = "trades.csv"
+df_raw = None
+if os.path.exists(trades_path):
+    try:
+        df_raw = pd.read_csv(trades_path)
+        st.success(f"Loaded {len(df_raw)} rows from trades.csv")
+    except Exception as e:
+        st.error(f"Failed reading trades.csv: {e}")
+        df_raw = None
+
+def sample_trades():
+    return pd.DataFrame([
+        {"symbol":"NIFTY24SEP24700CE","quantity":1,"lot_size":75,"entry_price":20.0,"exit_price":45.0,"entry_time":"2025-09-01 09:17:00","exit_time":"2025-09-01 09:43:00","fees":15,"notes":"Breakout"},
+        {"symbol":"NIFTY24SEP24800CE","quantity":2,"lot_size":75,"entry_price":12.0,"exit_price":7.0,"entry_time":"2025-09-01 10:05:00","exit_time":"2025-09-01 10:45:00","fees":10,"notes":"Volatile"}
+    ])
+
+if df_raw is None or df_raw.empty:
+    df_raw = sample_trades()
+    st.info("Using sample dataset. Upload your CSV to use real trades.")
+
+# normalize headers
+df = df_raw.copy()
+df.columns = [str(c).strip().lower() for c in df.columns]
+
+# ensure minimal columns
+for c in ["symbol","quantity","lot_size","entry_price","exit_price","entry_time","exit_time","fees","notes"]:
+    if c not in df.columns:
+        df[c] = np.nan
+
+# OHLC — create mock candles if not present
+if not set(["open","high","low","close"]).issubset(set(df.columns)):
+    base = 25000.0
+    n = 30
+    times = pd.date_range(start=datetime.now().replace(hour=9,minute=15,second=0,microsecond=0), periods=n, freq='10min')
+    prices = base + np.cumsum(np.random.randn(n)) * 6
+    openp = prices + np.random.randn(n) * 1.5
+    closep = prices + np.random.randn(n) * 1.5
+    highp = np.maximum(openp, closep) + np.abs(np.random.randn(n) * 2)
+    lowp = np.minimum(openp, closep) - np.abs(np.random.randn(n) * 2)
+    candles = pd.DataFrame({"timestamp": times, "open": openp, "high": highp, "low": lowp, "close": closep})
+    candles["timestamp"] = tz_localize_series(candles["timestamp"], KOLKATA)
+else:
+    # use provided OHLC (attempt)
+    if "timestamp" in df.columns:
+        candles = df[["timestamp","open","high","low","close"]].dropna()
+        candles["timestamp"] = tz_localize_series(candles["timestamp"], KOLKATA)
+    else:
+        # fallback mock
+        base = 25000.0
+        n = 30
+        times = pd.date_range(start=datetime.now().replace(hour=9,minute=15,second=0,microsecond=0), periods=n, freq='10min')
+        prices = base + np.cumsum(np.random.randn(n)) * 6
+        openp = prices + np.random.randn(n) * 1.5
+        closep = prices + np.random.randn(n) * 1.5
+        highp = np.maximum(openp, closep) + np.abs(np.random.randn(n) * 2)
+        lowp = np.minimum(openp, closep) - np.abs(np.random.randn(n) * 2)
+        candles = pd.DataFrame({"timestamp": times, "open": openp, "high": highp, "low": lowp, "close": closep})
+        candles["timestamp"] = tz_localize_series(candles["timestamp"], KOLKATA)
+
+# compute indicators on candles
+candles_df = candles.copy().reset_index(drop=True)
+candles_df["ema9"] = ema(candles_df["close"], 9)
+candles_df["ema21"] = ema(candles_df["close"], 21)
+candles_df["rsi14"] = rsi(candles_df["close"], 14)
+
+# ------------------------
+# Header block with inline SVG abstract logo and negative margin to pull header up (flush)
+# ------------------------
+svg_logo = '''
+<svg width="40" height="40" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AT logo">
+  <rect rx="8" ry="8" width="64" height="64" fill="#f0a500"/>
+  <g transform="translate(8,8)" fill="none" stroke="#0b1d3a" stroke-width="2">
+    <!-- abstract upward arrow + cog teeth -->
+    <path d="M6 28 L18 6 L30 24" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="20" cy="30" r="6" fill="#0b1d3a"/>
+    <path d="M20 24 L20 18" stroke="#f0a500"/>
+  </g>
+</svg>
+'''
+st.markdown(f"""
+<div style="margin-top:-22px;padding:10px 0 6px 0;">
+  <div style="background:#0b1d3a;border-radius:6px;padding:12px;display:flex;align-items:center;">
+    <div style="width:48px;height:48px;margin-right:12px">{svg_logo}</div>
+    <div style="color:#ffffff;font-size:22px;font-weight:700;line-height:1">Trading Journal</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ------------------------
+# Parse trade datetimes
+# ------------------------
+for col in ["entry_time","exit_time"]:
+    if col in df.columns:
+        df[col + "_parsed"] = tz_localize_series(df[col], KOLKATA)
+    else:
+        df[col + "_parsed"] = pd.NaT
+
+# numeric coercion
+df["quantity"] = pd.to_numeric(df.get("quantity", np.nan), errors="coerce").fillna(0)
+df["lot_size"] = pd.to_numeric(df.get("lot_size", np.nan), errors="coerce").fillna(global_lot_size)
+df["entry_price"] = pd.to_numeric(df.get("entry_price", np.nan), errors="coerce")
+df["exit_price"] = pd.to_numeric(df.get("exit_price", np.nan), errors="coerce")
+df["fees"] = pd.to_numeric(df.get("fees", np.nan), errors="coerce").fillna(default_fees)
+
+# pnl and cumulative
+df["pnl"] = df.apply(lambda r: compute_pnl_units(r, global_lot_size), axis=1)
+running = float(initial_balance)
+cumul = []
+for _,r in df.iterrows():
+    if pd.notna(r.get("exit_price")) and pd.notna(r.get("exit_time_parsed")):
+        pnl = 0.0 if pd.isna(r.get("pnl")) else float(r.get("pnl"))
+        running += pnl
+        cumul.append(running)
+    else:
+        cumul.append(running)
+df["cumulative_balance"] = cumul
+
+# trades today (discipline)
+today = datetime.now(tz=KOLKATA).date()
+df["exit_date"] = df["exit_time_parsed"].dt.tz_convert(KOLKATA).dt.date
+trades_today = int((df["exit_date"] == today).sum())
+
+# progress bar
+total_pnl = float(df["pnl"].sum() if "pnl" in df.columns else 0.0)
+fraction = 0.0
+if daily_target != 0:
+    fraction = min(max(total_pnl / daily_target, 0.0), 1.0)
+
+# PnL badge + progress
+colL, colR = st.columns([1,8])
+with colL:
+    st.markdown(f"<div style='display:inline-block;background:#ff7f11;color:#ffffff;padding:6px 10px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.12);font-weight:700'>PnL Progress: ₹{total_pnl:,.2f}</div>", unsafe_allow_html=True)
+with colR:
+    st.progress(fraction)
+
+# discipline banner
+if trades_today > max_trades:
+    st.warning(f"Discipline alert — trades today: {trades_today} > max {max_trades}. Consider pausing trading.")
+
+# signal (forceable)
+if force_mode == "Auto":
+    last = candles_df.iloc[-1]
+    signal = "HOLD"
+    if not pd.isna(last["ema9"]) and not pd.isna(last["ema21"]):
+        signal = "BUY_CE" if last["ema9"] > last["ema21"] else "BUY_PE"
+else:
+    signal = force_mode
+st.markdown(f"**Latest signal:** {signal}")
+
+# ------------------------
+# Plotly candles + EMA overlays + RSI
+# ------------------------
+def plot_candles(dfc):
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=dfc["timestamp"],
+        open=dfc["open"],
+        high=dfc["high"],
+        low=dfc["low"],
+        close=dfc["close"],
+        increasing_line_color='green',
+        decreasing_line_color='red',
+        name='Price',
+        whiskerwidth=0.8
+    ))
+    fig.add_trace(go.Scatter(x=dfc["timestamp"], y=dfc["ema9"], mode='lines', name='EMA9', line=dict(color='orange', width=1.6)))
+    fig.add_trace(go.Scatter(x=dfc["timestamp"], y=dfc["ema21"], mode='lines', name='EMA21', line=dict(color='blue', width=1.4, dash='dot')))
+    fig.update_layout(plot_bgcolor='white', paper_bgcolor='white', margin=dict(l=60,r=20,t=10,b=60), xaxis=dict(title='Time (IST)', showgrid=False), yaxis=dict(title='Premium', showgrid=False), height=520)
+    return fig
+
+if show_candles:
+    try:
+        fig = plot_candles(candles_df)
+        st.plotly_chart(fig, use_container_width=False, width='stretch')
+    except Exception as e:
+        st.error(f"Chart error: {e}")
+
+# RSI small chart
+try:
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(x=candles_df["timestamp"], y=candles_df["rsi14"], mode='lines', name='RSI', line=dict(color='purple')))
+    fig2.update_layout(height=140, margin=dict(l=60,r=20,t=10,b=20), yaxis=dict(title='RSI', range=[0,100]), xaxis=dict(showgrid=False))
+    st.plotly_chart(fig2, use_container_width=False, width='stretch')
+except Exception:
+    pass
+
+# ------------------------
+# Trade ledger (rename headers, remove trade_id)
+# ------------------------
+display_df = df.copy()
+if "trade_id" in display_df.columns:
+    display_df = display_df.drop(columns=["trade_id"])
+rename_map = {c: " ".join([p.capitalize() for p in str(c).replace("_"," ").split()]) for c in display_df.columns}
+display_df = display_df.rename(columns=rename_map)
+st.subheader("Trade Ledger")
+st.dataframe(display_df, width='stretch')
+
+# ------------------------
+# Exports and monthly backup (safe)
+# ------------------------
+def export_csv(df_export, prefix="trading_journal"):
+    try:
+        os.makedirs("exports", exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join("exports", f"{prefix}_{ts}.csv")
+        df_export.to_csv(path, index=False)
+        return path
+    except Exception:
+        return None
+
+if st.button("Export visible table to CSV"):
+    res = export_csv(display_df, prefix="trading_journal")
+    if res:
+        st.success(f"Exported: {res}")
+    else:
+        st.error("Export failed")
+
+# force immediate export
+if st.session_state.get("_force_export", False):
+    r = export_csv(display_df, prefix="trading_journal_manual")
+    if r: st.success(f"Manual export: {r}")
+    else: st.error("Manual export failed")
+    st.session_state["_force_export"] = False
+
+# monthly backup (first day)
+try:
+    now = datetime.now(tz=KOLKATA)
+    if os.path.exists(trades_path) and now.day == 1:
+        marker = ".last_month_backup"
+        done = None
+        if os.path.exists(marker):
+            done = open(marker,"r",encoding="utf-8").read().strip()
+        cur = now.strftime("%Y%m")
+        if done != cur:
+            os.makedirs("exports", exist_ok=True)
+            dest = os.path.join("exports", f"trades_backup_{cur}.csv")
+            try:
+                os.replace(trades_path, dest)
+                with open(trades_path,"w",encoding="utf-8") as f:
+                    f.write("symbol,quantity,lot_size,entry_price,exit_price,entry_time,exit_time,fees,notes\n")
+                with open(marker,"w",encoding="utf-8") as f:
+                    f.write(cur)
+                st.info(f"Monthly backup: {dest}")
+            except Exception as e:
+                st.error(f"Monthly backup failed: {e}")
+except Exception:
+    pass
+
+# End
