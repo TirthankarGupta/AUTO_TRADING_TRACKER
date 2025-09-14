@@ -158,19 +158,19 @@ st.set_page_config(page_title="Trading - Momentum Surge Scalping", layout="wide"
 
 css = """
 <style>
-/* Canvas + remove Streamlit top chrome */
+/* page background & remove top chrome */
 html, body, .stApp { background: #ffffff; margin:0; padding:0; }
 header[data-testid="stHeader"], #MainMenu, .css-1rs6os.edgvbvh3 { display: none !important; }
 
-/* Reserve space for the fixed hero header (hero height 96px + top margin) */
+/* main container: reserve space for fixed hero header */
 .block-container, .reportview-container .main .block-container, .main .block-container {
-  padding-top: 140px !important; /* keep hero space */
-  padding-left: 20px !important;
-  padding-right: 20px !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
   max-width: none !important;
+  padding-top: 140px !important; /* reserve space for hero */
 }
 
-/* Sidebar appearance */
+/* Sidebar: width and appearance */
 .stSidebar { background: #071a2a !important; padding-top: 12px !important; width: 300px !important; z-index: 2000 !important; }
 
 /* CONTROL header */
@@ -180,11 +180,11 @@ header[data-testid="stHeader"], #MainMenu, .css-1rs6os.edgvbvh3 { display: none 
   border:1px solid rgba(255,255,255,0.04); margin-bottom:10px;
 }
 
-/* HERO - fixed and stretched (unchanged) */
+/* HERO - fixed, starts after sidebar, stretches to right edge */
 .hero {
   position: fixed !important;
   top: 16px !important;
-  left: calc(300px + 24px) !important; /* hero starts after sidebar + small gap */
+  left: calc(300px + 24px) !important;
   right: 24px !important;
   height: 96px !important;
   z-index: 1500 !important;
@@ -199,218 +199,75 @@ header[data-testid="stHeader"], #MainMenu, .css-1rs6os.edgvbvh3 { display: none 
   overflow:hidden !important;
 }
 
-/* Make main content align with hero left edge (chart + PnL row) */
-.reportview-container .main, .main {
-  margin-left: calc(300px + 24px) !important; /* align content with hero left */
-  max-width: calc(100% - (300px + 48px)) !important;
+/* hero logo container and image: surgical fixes to remove white frame and size correctly */
+.hero-logo { flex: 0 0 96px !important; display:flex !important; align-items:center !important; justify-content:center !important; margin-left:4px !important; }
+.hero-logo img {
+  height: 72px !important;
+  width: auto !important;
+  display: block !important;
+  border-radius: 8px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  border: none !important;
+  image-rendering: -webkit-optimize-contrast !important;
+  object-fit: contain !important;
 }
 
-/* Sidebar input readability */
+/* hero title */
+.hero-title { display:flex; flex-direction:column; }
+.hero-title .main { font-size:22px; font-weight:800; line-height:1.05; }
+.hero-title .sub { margin-top:6px; font-size:12px; color:#cfe9ff; }
+
+/* Sidebar default text color (white) */
 .stSidebar * { color: #ffffff !important; }
+
+/* Make sidebar inputs white bg and visible text black */
 .stSidebar input, .stSidebar select, .stSidebar textarea, .stSidebar .stButton>button, .stSidebar .stDownloadButton>button {
   background: #ffffff !important; color: #000000 !important; border-radius:6px !important;
 }
 
-/* Force selectbox + dropdown text to black broadly */
-.stSidebar div[role="combobox"], .stSidebar .stSelectbox, .stSidebar .stSelectbox *, .stSidebar select, .stSidebar select * {
+/* Broad force for selectbox displayed text & dropdown items to black (covers many Streamlit variants) */
+.stSidebar div[role="combobox"], .stSidebar .stSelectbox, .stSidebar .stSelectbox *,
+.stSidebar select, .stSidebar select *, .stSidebar [data-baseweb="select"] *, .stSidebar [data-testid="stSelectbox"] * {
   color: #000000 !important;
   -webkit-text-fill-color: #000000 !important;
+  opacity: 1 !important;
 }
 
-/* Increase Trading Journal width and make Comments column roomier */
-.journal-table { width: 100% !important; table-layout: auto !important; }
-.journal-table th, .journal-table td { padding: 10px 14px !important; vertical-align: middle !important; }
-.journal-table td:nth-child(1) { width: 40px !important; }  /* No. */
-.journal-table td:nth-child(2) { width: 180px !important; } /* Symbol */
-.journal-table td:nth-child(3) { width: 160px !important; } /* Entry Time */
-.journal-table td:nth-child(4) { width: 110px !important; } /* Entry Price */
-.journal-table td:nth-child(5) { width: 160px !important; } /* Exit Time */
-.journal-table td:nth-child(6) { width: 110px !important; } /* Exit Price */
-.journal-table td:nth-child(7) { width: 32% !important; }   /* Comments larger area */
-.journal-table td:nth-child(8) { width: 110px !important; } /* Gross PnL */
+/* Force options in opened dropdowns to be readable */
+.stSidebar option, .stSidebar select option { color: #000000 !important; background: #ffffff !important; }
 
-/* ensure plotly uses full width */
-.stPlotlyChart > div, .element-container > .stPlotlyChart, .stPlotlyChart { width: 100% !important; }
-
-/* small responsive fallback */
-@media (max-width: 1200px) {
-  .reportview-container .main, .main { margin-left: calc(300px + 16px) !important; }
-  .journal-table td:nth-child(7) { width: auto !important; }
+/* Force button labels and nested spans to black */
+.stSidebar .stButton>button, .stSidebar .stButton>button *, .stSidebar button, .stSidebar button * {
+  color: #000000 !important; -webkit-text-fill-color: #000000 !important; opacity: 1 !important;
 }
 
-/* ==== HERO / LOGO FIX (injected override) ==== */
-/* Ensure hero is a left-aligned flex container and logo is clamped */
-.hero {
-  position: fixed !important;
-  top: 16px !important;
-  left: calc(300px + 24px) !important;
-  right: 24px !important;
-  height: 96px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-start !important; /* keep content left */
-  gap: 18px !important;
-  padding: 12px 18px !important;
-  overflow: visible !important;
-  z-index: 1600 !important;
+/* Placeholders */
+.stSidebar ::placeholder { color: #000000 !important; opacity: 1 !important; -webkit-text-fill-color: #000000 !important; }
+
+/* Journal table */
+.journal-title { margin-top:8px; margin-bottom:6px; font-size:16px; font-weight:700; }
+.journal-table th { text-transform: capitalize; background:#f7fafc; padding:8px; text-align:left; font-weight:700; }
+.journal-table tr:nth-child(even) { background:#fbfbfb; }
+
+/* Responsive fallback: hero becomes relative on small screens */
+@media (max-width: 1100px) {
+  .hero { position: relative !important; left: 0 !important; right: 0 !important; width: calc(100% - 40px) !important; margin: 12px 20px !important; height: auto !important; }
+  .block-container, .reportview-container .main .block-container, .main .block-container { padding-top: 18px !important; }
 }
 
-/* Logo container keeps fixed width and centers the image */
-.hero-logo {
-  flex: 0 0 96px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  margin-right: 12px !important;
-  background: transparent !important;
-}
-
-/* Clamp image size and ensure it won't expand the hero */
+/* --- Logo visibility patch: subtle contrast, padding, shadow, brighten --- */
 .hero-logo img {
-  height: 72px !important;
-  width: auto !important;
-  max-width: 100% !important;
+  background: linear-gradient(135deg, rgba(16,90,75,0.14), rgba(7,45,52,0.08)) !important;
+  padding: 10px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 20px rgba(7,18,28,0.35) !important;
+  filter: brightness(1.18) saturate(1.06) !important;
+  border: 1px solid rgba(255,255,255,0.02) !important;
   object-fit: contain !important;
-  border-radius: 8px !important;
-  box-shadow: none !important;
-  display: block !important;
 }
-
-/* Keep title left-aligned and vertically centered */
-.hero-title { display:flex !important; flex-direction:column !important; align-items:flex-start !important; }
-.hero-title .main { font-size:22px !important; font-weight:800 !important; line-height:1.05 !important; text-align:left !important; }
-.hero-title .sub { font-size:12px !important; color:#cfe9ff !important; text-align:left !important; margin-top:6px !important; }
-
-/* small defensive rule: prevent hero internal elements from wrapping badly */
-.hero > * { min-width: 0 !important; }
-
-/* end hero override */
-
-/* === Actions visibility & freeze-pane overrides (injected) === */
-/* 1) Force sidebar button/input/dropdown text to black (broad catch-alls) */
-.stSidebar .stButton>button,
-.stSidebar .stButton>button * ,
-.stSidebar button,
-.stSidebar button * {
-  color: #000000 !important;
-  -webkit-text-fill-color: #000000 !important;
-  opacity: 1 !important;
-}
-
-/* Force inputs / selects / placeholders to use black text in sidebar */
-.stSidebar input[type="text"],
-.stSidebar input[type="search"],
-.stSidebar .stTextInput input,
-.stSidebar textarea,
-.stSidebar select,
-.stSidebar .stSelectbox,
-.stSidebar .stSelectbox * {
-  color: #000000 !important;
-  -webkit-text-fill-color: #000000 !important;
-  opacity: 1 !important;
-}
-.stSidebar ::placeholder { color:#000000 !important; opacity:1 !important; }
-
-/* Defensive: also target baseweb/select and other internal selectors */
-.stSidebar [data-baseweb="select"] *, .stSidebar [data-testid="stSelectbox"] * { color: #000000 !important; }
-
-/* 2) Freeze layout: fix sidebar + hero and make main content the scroll area */
-/* lock horizontal overflow to avoid page shift */
-html, body, .stApp { overflow-x: hidden !important; }
-
-/* fix the sidebar so it does not scroll away */
-.stSidebar {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  height: 100vh !important;
-  overflow-y: auto !important;
-  padding-top: 16px !important;
-  z-index: 2000 !important;
-}
-
-/* ensure hero stays fixed at top (visible) */
-.hero {
-  position: fixed !important;
-  top: 16px !important;
-  left: calc(300px + 24px) !important; /* align right of sidebar */
-  right: 24px !important;
-  z-index: 1600 !important;
-}
-
-/* make the main block scrollable (content area) */
-.block-container, .reportview-container .main .block-container, .main .block-container {
-  margin-left: calc(300px + 24px) !important;
-  margin-right: 24px !important;
-  padding-top: 124px !important; /* leave space for the hero */
-  height: calc(100vh - 140px) !important; /* viewport minus hero/padding */
-  overflow-y: auto !important;
-}
-
-/* ensure charts/tables inside main can grow and use width */
-.stPlotlyChart, .stDataFrame, .journal-table { width: 100% !important; }
-
-/* small nicety: avoid unexpected horizontal scrollbar inside main */
-.block-container * { max-width: 100% !important; box-sizing: border-box !important; }
-
-/* end injected overrides */
-
-/* === ALIGNMENT FIX BY AI === */
-/* Align block-container (chart/journal/pnl) with hero left edge and clamp widths */
-:root {
-  --sidebar-w: 300px;
-  --hero-left-gap: 24px;
-  --hero-top: 16px;
-  --hero-height: 96px;
-  --hero-padding: 12px;
-}
-
-/* Ensure hero is left-aligned and won't center its content */
-.hero {
-  left: calc(var(--sidebar-w) + var(--hero-left-gap)) !important;
-  right: var(--hero-left-gap) !important;
-  width: auto !important;
-  margin: 0 !important;
-  display: flex !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-  gap: 18px !important;
-  padding: 12px 18px !important;
-  box-sizing: border-box !important;
-}
-
-/* Keep logo fixed size and prevent it pushing layout */
-.hero-logo { flex: 0 0 96px !important; display:flex !important; align-items:center !important; justify-content:center !important; }
-.hero-logo img { height: 72px !important; width: auto !important; max-width: 100% !important; object-fit: contain !important; }
-
-/* Make main content align to the same left as hero */
-.block-container, .reportview-container .main .block-container, .main .block-container {
-  margin-left: calc(var(--sidebar-w) + var(--hero-left-gap)) !important;
-  margin-right: var(--hero-left-gap) !important;
-  padding-top: calc(var(--hero-top) + var(--hero-height) + 12px) !important; /* leave space for fixed hero */
-  max-width: calc(100% - (var(--sidebar-w) + 2 * var(--hero-left-gap))) !important;
-  box-sizing: border-box !important;
-}
-
-/* Ensure the PnL/top row uses same left alignment and width */
-.block-container > div:first-child, .stBlock {
-  margin-left: 0 !important;
-  width: 100% !important;
-}
-
-/* Make plotly charts and dataframes use full available width inside block-container */
-.stPlotlyChart, .stDataFrame, .journal-table {
-  width: 100% !important;
-  margin-left: 0 !important;
-}
-
-/* Prevent inner content from adding extra left padding */
-.main .block-container > * { padding-left: 0 !important; box-sizing: border-box !important; }
-
-/* Safety clamp: no overflow shifting */
-html, body, .stApp { overflow-x: hidden !important; }
-
-/* end alignment fix */
 </style>
 """
 st.markdown(css, unsafe_allow_html=True)
@@ -418,24 +275,6 @@ st.markdown(css, unsafe_allow_html=True)
 # -------------------------
 # Render header
 # -------------------------
-
-# --- PNG logo loader (auto): tries common names then any PNG in repo root ---
-import os, base64, glob
-_png_candidates = ["header_logo.png", "logo.png", "logo-header.png"] + sorted(glob.glob("*.png"))
-_LOGO_PATH = None
-for _p in _png_candidates:
-    if _p and os.path.exists(_p):
-        _LOGO_PATH = _p
-        break
-if _LOGO_PATH:
-    try:
-        with open(_LOGO_PATH, "rb") as _f:
-            _b = base64.b64encode(_f.read()).decode("ascii")
-        LOGO_DATA_URI = "data:image/png;base64," + _b
-        print(f"INFO: Using PNG logo: {_LOGO_PATH}")
-    except Exception as _e:
-        print("WARNING: failed to load PNG logo:", _e)
-# --- end PNG logo loader ---
 hero_html = (
     "<div class='hero' role='banner' aria-label='Trading hero header'>"
     "<div class='hero-logo'><img src='" + LOGO_DATA_URI + "' alt='logo' /></div>"
@@ -505,7 +344,7 @@ with st.sidebar:
     st.markdown('<div class="sidebar-label-black">Candle frequency</div>', unsafe_allow_html=True)
     interval = st.selectbox("", ["1m", "3m", "5m", "15m", "30m"], index=3)
 
-    st.markdown("<h3 style='color:#ffffff;'>EMAs</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#ffffff;'>Emas</h3>", unsafe_allow_html=True)
     ema_short = st.number_input("EMA (short)", min_value=2, max_value=50, value=9)
     ema_long = st.number_input("EMA (long)", min_value=5, max_value=200, value=21)
 

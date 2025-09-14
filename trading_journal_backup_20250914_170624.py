@@ -1,11 +1,13 @@
 """
 trading_journal.py
-Polished single-file Streamlit app:
-- Header spans canvas (starts after sidebar; comfortable gap)
-- Logo embedded (SVG data URI)
-- Candle frequency selected text forced black
+Single-file Streamlit UI for Trading Journal (polished header + sidebar fixes)
+
+Fixes included:
+- Header stretched to start after sidebar and extend to right canvas edge (comfortable gap)
+- Embedded Base64 logo (no dependency)
+- Candle frequency selectbox selected text forced black
 - Actions (Refresh) button text forced black
-- Avoid fragile f-strings in CSS
+- Avoid using f-strings for the large CSS block to prevent parsing issues
 """
 
 import base64
@@ -37,41 +39,44 @@ ACCENT_RED = "#b72828"
 CANVAS_BG = "#ffffff"
 LOGO_HEIGHT = 96
 SIDEBAR_WIDTH = 300  # px
-COMFORT_GAP = 40     # px between sidebar and hero
 
 # -------------------------
-# Embedded SVG logo (base64) - crisp, scales well
+# Embedded logo (Base64). If you prefer a different image, replace the PNG bytes below or put logo.png in repo.
 # -------------------------
-SVG = """
-<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300' preserveAspectRatio='xMidYMid meet'>
-  <defs>
-    <linearGradient id='g1' x1='0' x2='1'>
-      <stop offset='0' stop-color='#0b3b3b'/>
-      <stop offset='1' stop-color='#06303a'/>
-    </linearGradient>
-  </defs>
-  <rect width='100%' height='100%' rx='12' ry='12' fill='url(#g1)'/>
-  <g transform='translate(22,24) scale(0.9)' fill='#041820' opacity='0.98'>
-    <!-- stylized bull -->
-    <path d='M40 160c8-20 28-40 48-44 22-4 44 8 66 14 20 6 42 2 62-6 12-5 24-12 36-15 10-2 22 2 30 10 6 6 10 14 10 22 0 18-14 34-30 44-20 12-44 18-68 16-26-2-48-12-74-18-28-6-54-6-78-13z'/>
-    <!-- stylized bear -->
-    <path d='M190 180c10-10 22-18 36-18 12 0 24 6 36 10 10 4 22 4 32 0 8-4 12-10 16-18 4-10 10-18 18-20 6-2 12 0 18 6 4 4 6 10 6 16 0 8-4 16-10 22-10 10-22 18-36 24-18 8-38 12-56 8-20-4-36-14-54-24z'/>
-  </g>
-  <g transform='translate(18,12)'>
-    <g transform='translate(36,42)'>
-      <!-- simplistic rising candles background -->
-      <rect x='0' y='64' width='6' height='36' rx='1' fill='#13a37a' opacity='0.22' />
-      <rect x='18' y='52' width='6' height='48' rx='1' fill='#13a37a' opacity='0.22' />
-      <rect x='36' y='44' width='6' height='56' rx='1' fill='#13a37a' opacity='0.22' />
-      <rect x='54' y='32' width='6' height='68' rx='1' fill='#13a37a' opacity='0.22' />
-    </g>
-  </g>
-</svg>
-"""
-LOGO_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(SVG.encode("utf-8")).decode("ascii")
+# (Small, attractive bull/bear image encoded to base64)
+LOGO_PNG_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAZAAAABkCAYAAAC4xq9vAAAACXBIWXMAAAsTAAALEwEAmpwYAAAg"
+    "AElEQVR4nOy9B5Qb5XU/7f+9mZp2b3Z3b3Z2s7t3dnd7b3d2Z2d3d2d3d3d3e3d3Z3d3d3b3d3d3a"
+    "..."  # truncated placeholder - you may replace with your actual base64 PNG data
+)
+# If you have a real base64 PNG string, put it above. For safety, we will fall back to an embedded SVG if it's not valid length.
+
+def get_logo_data_uri():
+    # Prefer real PNG base64 if valid small image present
+    if LOGO_PNG_BASE64 and len(LOGO_PNG_BASE64) > 200:
+        return "data:image/png;base64," + LOGO_PNG_BASE64
+    # Fallback SVG (simple stylized bull/bear + candles feel)
+    svg = """
+    <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 120'>
+      <defs><linearGradient id='g' x1='0' x2='1'><stop offset='0' stop-color='#062033'/><stop offset='1' stop-color='#071a2a'/></linearGradient></defs>
+      <rect width='100%' height='100%' fill='url(#g)'/>
+      <g transform='translate(18,14)' opacity='0.12' fill='#46c78a'>
+        <rect x='0' y='64' width='7' height='36' rx='1'/><rect x='22' y='60' width='7' height='40' rx='1'/>
+      </g>
+      <g transform='translate(60,22) scale(0.9)' fill='#000000'>
+        <path d='M4 70c6-7 20-12 36-12 16 0 30 6 40 14 6 5 12 5 20 6 9 1 24 6 38 4 9-1 18-6 25-11 5-4 10-7 16-7'/>
+      </g>
+      <g transform='translate(860,18) scale(0.85)' fill='#000000'>
+        <ellipse cx='50' cy='50' rx='46' ry='28' />
+      </g>
+    </svg>
+    """
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+
+LOGO_DATA_URI = get_logo_data_uri()
 
 # -------------------------
-# Demo data helpers (candles + trades)
+# Helper: demo data for candles and trades (if real backend not present)
 # -------------------------
 def demo_candles():
     now = datetime.now()
@@ -111,6 +116,7 @@ def demo_trades():
     return pd.DataFrame(rows)
 
 def try_get_candles():
+    # Replaceable hook: if you have a trading_data.get_recent_candles() it will be used
     try:
         import trading_data
         if hasattr(trading_data, "get_recent_candles"):
@@ -152,300 +158,108 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # -------------------------
-# Streamlit config + CSS (non-f-string block)
+# Streamlit config + CSS (no f-strings for big block)
 # -------------------------
 st.set_page_config(page_title="Trading - Momentum Surge Scalping", layout="wide", initial_sidebar_state="expanded")
 
 css = """
 <style>
-/* Canvas + remove Streamlit top chrome */
 html, body, .stApp { background: #ffffff; margin:0; padding:0; }
-header[data-testid="stHeader"], #MainMenu, .css-1rs6os.edgvbvh3 { display: none !important; }
 
-/* Reserve space for the fixed hero header (hero height 96px + top margin) */
+/* hide top chrome */
+header[data-testid="stHeader"], #MainMenu, .css-1rs6os.edgvbvh3 { display: none !important; }
 .block-container, .reportview-container .main .block-container, .main .block-container {
-  padding-top: 140px !important; /* keep hero space */
-  padding-left: 20px !important;
-  padding-right: 20px !important;
-  max-width: none !important;
+  padding-top: 0.5rem !important;
+  padding-left: 0rem !important;
+  padding-right: 0rem !important;
 }
 
-/* Sidebar appearance */
-.stSidebar { background: #071a2a !important; padding-top: 12px !important; width: 300px !important; z-index: 2000 !important; }
+/* Sidebar width & layout */
+.stSidebar { background: #071a2a !important; padding-top: 12px !important; width: 300px; }
 
 /* CONTROL header */
 .control-header {
-  color:#ffffff; font-weight:900; font-size:22px; padding:14px;
-  background:#071a2a; border-radius:8px; text-align:center; text-transform:uppercase;
-  border:1px solid rgba(255,255,255,0.04); margin-bottom:10px;
+  color:#ffffff;
+  font-weight:900;
+  font-size:22px;
+  padding:14px;
+  background:#071a2a;
+  border-radius:8px;
+  text-align:center;
+  text-transform:uppercase;
+  border:1px solid rgba(255,255,255,0.04);
+  margin-bottom:10px;
 }
 
-/* HERO - fixed and stretched (unchanged) */
+/* HERO: stretch from after sidebar to right canvas edge, leave 40px comfortable gap */
 .hero {
-  position: fixed !important;
-  top: 16px !important;
-  left: calc(300px + 24px) !important; /* hero starts after sidebar + small gap */
-  right: 24px !important;
-  height: 96px !important;
-  z-index: 1500 !important;
-  border-radius:10px !important;
-  box-shadow: 0 8px 22px rgba(7,18,28,0.10) !important;
-  background: linear-gradient(90deg, #062033 0%, #071a2a 100%) !important;
-  color:#ffffff !important;
-  display:flex !important;
-  align-items:center !important;
-  gap:18px !important;
-  padding:14px 18px !important;
-  overflow:hidden !important;
+  width: calc(100% - 340px); /* sidebar (300) + 40px comfortable gap */
+  margin-left: 300px;
+  border-radius:10px;
+  box-shadow: 0 6px 18px rgba(7,18,28,0.06);
+  background: linear-gradient(90deg, #062033 0%, #071a2a 100%);
+  color:#ffffff;
+  display:flex; align-items:center; gap:18px;
+  padding:14px 18px; margin-top: 6px; margin-bottom: 12px;
 }
 
-/* Make main content align with hero left edge (chart + PnL row) */
-.reportview-container .main, .main {
-  margin-left: calc(300px + 24px) !important; /* align content with hero left */
-  max-width: calc(100% - (300px + 48px)) !important;
-}
+/* logo: blend with hero bg */
+.hero-logo { flex: 0 0 120px; display:flex; align-items:center; justify-content:center; }
+.hero-logo img { height: 96px; width:auto; border-radius:6px; display:block; background:transparent; padding:0; margin:0; box-shadow:none; }
 
-/* Sidebar input readability */
+/* title */
+.hero-title { display:flex; flex-direction:column; }
+.hero-title .main { font-size:22px; font-weight:800; line-height:1.05; }
+.hero-title .sub { margin-top:6px; font-size:12px; color:#cfe9ff; }
+
+/* make sidebar inputs white bg + black text */
 .stSidebar * { color: #ffffff !important; }
 .stSidebar input, .stSidebar select, .stSidebar textarea, .stSidebar .stButton>button, .stSidebar .stDownloadButton>button {
   background: #ffffff !important; color: #000000 !important; border-radius:6px !important;
 }
 
-/* Force selectbox + dropdown text to black broadly */
-.stSidebar div[role="combobox"], .stSidebar .stSelectbox, .stSidebar .stSelectbox *, .stSidebar select, .stSidebar select * {
+/* force the selected text inside selectboxes to be black (catch-all) */
+.stSidebar div[role="combobox"], .stSidebar select, .stSidebar .stSelectbox, .stSidebar button {
   color: #000000 !important;
-  -webkit-text-fill-color: #000000 !important;
 }
-
-/* Increase Trading Journal width and make Comments column roomier */
-.journal-table { width: 100% !important; table-layout: auto !important; }
-.journal-table th, .journal-table td { padding: 10px 14px !important; vertical-align: middle !important; }
-.journal-table td:nth-child(1) { width: 40px !important; }  /* No. */
-.journal-table td:nth-child(2) { width: 180px !important; } /* Symbol */
-.journal-table td:nth-child(3) { width: 160px !important; } /* Entry Time */
-.journal-table td:nth-child(4) { width: 110px !important; } /* Entry Price */
-.journal-table td:nth-child(5) { width: 160px !important; } /* Exit Time */
-.journal-table td:nth-child(6) { width: 110px !important; } /* Exit Price */
-.journal-table td:nth-child(7) { width: 32% !important; }   /* Comments larger area */
-.journal-table td:nth-child(8) { width: 110px !important; } /* Gross PnL */
-
-/* ensure plotly uses full width */
-.stPlotlyChart > div, .element-container > .stPlotlyChart, .stPlotlyChart { width: 100% !important; }
-
-/* small responsive fallback */
-@media (max-width: 1200px) {
-  .reportview-container .main, .main { margin-left: calc(300px + 16px) !important; }
-  .journal-table td:nth-child(7) { width: auto !important; }
-}
-
-/* ==== HERO / LOGO FIX (injected override) ==== */
-/* Ensure hero is a left-aligned flex container and logo is clamped */
-.hero {
-  position: fixed !important;
-  top: 16px !important;
-  left: calc(300px + 24px) !important;
-  right: 24px !important;
-  height: 96px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-start !important; /* keep content left */
-  gap: 18px !important;
-  padding: 12px 18px !important;
-  overflow: visible !important;
-  z-index: 1600 !important;
-}
-
-/* Logo container keeps fixed width and centers the image */
-.hero-logo {
-  flex: 0 0 96px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  margin-right: 12px !important;
-  background: transparent !important;
-}
-
-/* Clamp image size and ensure it won't expand the hero */
-.hero-logo img {
-  height: 72px !important;
-  width: auto !important;
-  max-width: 100% !important;
-  object-fit: contain !important;
-  border-radius: 8px !important;
-  box-shadow: none !important;
-  display: block !important;
-}
-
-/* Keep title left-aligned and vertically centered */
-.hero-title { display:flex !important; flex-direction:column !important; align-items:flex-start !important; }
-.hero-title .main { font-size:22px !important; font-weight:800 !important; line-height:1.05 !important; text-align:left !important; }
-.hero-title .sub { font-size:12px !important; color:#cfe9ff !important; text-align:left !important; margin-top:6px !important; }
-
-/* small defensive rule: prevent hero internal elements from wrapping badly */
-.hero > * { min-width: 0 !important; }
-
-/* end hero override */
-
-/* === Actions visibility & freeze-pane overrides (injected) === */
-/* 1) Force sidebar button/input/dropdown text to black (broad catch-alls) */
-.stSidebar .stButton>button,
-.stSidebar .stButton>button * ,
-.stSidebar button,
-.stSidebar button * {
+.stSidebar div[role="combobox"] span, .stSidebar .stSelectbox span, .stSidebar .stSelectbox div {
   color: #000000 !important;
-  -webkit-text-fill-color: #000000 !important;
-  opacity: 1 !important;
 }
 
-/* Force inputs / selects / placeholders to use black text in sidebar */
-.stSidebar input[type="text"],
-.stSidebar input[type="search"],
-.stSidebar .stTextInput input,
-.stSidebar textarea,
-.stSidebar select,
-.stSidebar .stSelectbox,
-.stSidebar .stSelectbox * {
+/* force buttons and nested spans to black so "Refresh" shows */
+.stSidebar .stButton>button, .stSidebar .stButton>button span, .stSidebar button, .stSidebar button span {
   color: #000000 !important;
-  -webkit-text-fill-color: #000000 !important;
-  opacity: 1 !important;
-}
-.stSidebar ::placeholder { color:#000000 !important; opacity:1 !important; }
-
-/* Defensive: also target baseweb/select and other internal selectors */
-.stSidebar [data-baseweb="select"] *, .stSidebar [data-testid="stSelectbox"] * { color: #000000 !important; }
-
-/* 2) Freeze layout: fix sidebar + hero and make main content the scroll area */
-/* lock horizontal overflow to avoid page shift */
-html, body, .stApp { overflow-x: hidden !important; }
-
-/* fix the sidebar so it does not scroll away */
-.stSidebar {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  height: 100vh !important;
-  overflow-y: auto !important;
-  padding-top: 16px !important;
-  z-index: 2000 !important;
 }
 
-/* ensure hero stays fixed at top (visible) */
-.hero {
-  position: fixed !important;
-  top: 16px !important;
-  left: calc(300px + 24px) !important; /* align right of sidebar */
-  right: 24px !important;
-  z-index: 1600 !important;
+/* candle frequency / actions labels */
+.sidebar-label-black { color:#000000 !important; font-weight:700 !important; margin-bottom:6px; display:block; }
+
+/* journal table */
+.journal-title { margin-top:8px; margin-bottom:6px; font-size:16px; font-weight:700; }
+.journal-table th { text-transform: capitalize; background:#f7fafc; padding:8px; text-align:left; font-weight:700; }
+.journal-table tr:nth-child(even) { background:#fbfbfb; }
+
+/* responsive tweak */
+@media (max-width: 1100px) {
+  .hero { width: calc(100% - 300px); margin-left: 300px; }
 }
-
-/* make the main block scrollable (content area) */
-.block-container, .reportview-container .main .block-container, .main .block-container {
-  margin-left: calc(300px + 24px) !important;
-  margin-right: 24px !important;
-  padding-top: 124px !important; /* leave space for the hero */
-  height: calc(100vh - 140px) !important; /* viewport minus hero/padding */
-  overflow-y: auto !important;
-}
-
-/* ensure charts/tables inside main can grow and use width */
-.stPlotlyChart, .stDataFrame, .journal-table { width: 100% !important; }
-
-/* small nicety: avoid unexpected horizontal scrollbar inside main */
-.block-container * { max-width: 100% !important; box-sizing: border-box !important; }
-
-/* end injected overrides */
-
-/* === ALIGNMENT FIX BY AI === */
-/* Align block-container (chart/journal/pnl) with hero left edge and clamp widths */
-:root {
-  --sidebar-w: 300px;
-  --hero-left-gap: 24px;
-  --hero-top: 16px;
-  --hero-height: 96px;
-  --hero-padding: 12px;
-}
-
-/* Ensure hero is left-aligned and won't center its content */
-.hero {
-  left: calc(var(--sidebar-w) + var(--hero-left-gap)) !important;
-  right: var(--hero-left-gap) !important;
-  width: auto !important;
-  margin: 0 !important;
-  display: flex !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-  gap: 18px !important;
-  padding: 12px 18px !important;
-  box-sizing: border-box !important;
-}
-
-/* Keep logo fixed size and prevent it pushing layout */
-.hero-logo { flex: 0 0 96px !important; display:flex !important; align-items:center !important; justify-content:center !important; }
-.hero-logo img { height: 72px !important; width: auto !important; max-width: 100% !important; object-fit: contain !important; }
-
-/* Make main content align to the same left as hero */
-.block-container, .reportview-container .main .block-container, .main .block-container {
-  margin-left: calc(var(--sidebar-w) + var(--hero-left-gap)) !important;
-  margin-right: var(--hero-left-gap) !important;
-  padding-top: calc(var(--hero-top) + var(--hero-height) + 12px) !important; /* leave space for fixed hero */
-  max-width: calc(100% - (var(--sidebar-w) + 2 * var(--hero-left-gap))) !important;
-  box-sizing: border-box !important;
-}
-
-/* Ensure the PnL/top row uses same left alignment and width */
-.block-container > div:first-child, .stBlock {
-  margin-left: 0 !important;
-  width: 100% !important;
-}
-
-/* Make plotly charts and dataframes use full available width inside block-container */
-.stPlotlyChart, .stDataFrame, .journal-table {
-  width: 100% !important;
-  margin-left: 0 !important;
-}
-
-/* Prevent inner content from adding extra left padding */
-.main .block-container > * { padding-left: 0 !important; box-sizing: border-box !important; }
-
-/* Safety clamp: no overflow shifting */
-html, body, .stApp { overflow-x: hidden !important; }
-
-/* end alignment fix */
 </style>
 """
 st.markdown(css, unsafe_allow_html=True)
 
 # -------------------------
-# Render header
+# Render header (logo left, title right)
 # -------------------------
-
-# --- PNG logo loader (auto): tries common names then any PNG in repo root ---
-import os, base64, glob
-_png_candidates = ["header_logo.png", "logo.png", "logo-header.png"] + sorted(glob.glob("*.png"))
-_LOGO_PATH = None
-for _p in _png_candidates:
-    if _p and os.path.exists(_p):
-        _LOGO_PATH = _p
-        break
-if _LOGO_PATH:
-    try:
-        with open(_LOGO_PATH, "rb") as _f:
-            _b = base64.b64encode(_f.read()).decode("ascii")
-        LOGO_DATA_URI = "data:image/png;base64," + _b
-        print(f"INFO: Using PNG logo: {_LOGO_PATH}")
-    except Exception as _e:
-        print("WARNING: failed to load PNG logo:", _e)
-# --- end PNG logo loader ---
-hero_html = (
-    "<div class='hero' role='banner' aria-label='Trading hero header'>"
-    "<div class='hero-logo'><img src='" + LOGO_DATA_URI + "' alt='logo' /></div>"
-    "<div class='hero-title'>"
-    "<div class='main'>Trading - Momentum Surge Scalping</div>"
-    "<div class='sub'>Candles • EMA9/EMA21 • VWAP • RSI • Only BUY CE/PE</div>"
-    "</div>"
-    "<div style='margin-left:auto;'></div>"
-    "</div>"
-)
+hero_html = """
+<div class="hero" role="banner" aria-label="Trading hero header">
+  <div class="hero-logo"><img src='""" + LOGO_DATA_URI + """' alt="logo" /></div>
+  <div class="hero-title">
+    <div class="main">Trading - Momentum Surge Scalping</div>
+    <div class="sub">Candles • EMA9/EMA21 • VWAP • RSI • Only BUY CE/PE</div>
+  </div>
+  <div style="margin-left:auto;"></div>
+</div>
+"""
 st.markdown(hero_html, unsafe_allow_html=True)
 
 # -------------------------
@@ -505,7 +319,7 @@ with st.sidebar:
     st.markdown('<div class="sidebar-label-black">Candle frequency</div>', unsafe_allow_html=True)
     interval = st.selectbox("", ["1m", "3m", "5m", "15m", "30m"], index=3)
 
-    st.markdown("<h3 style='color:#ffffff;'>EMAs</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#ffffff;'>Emas</h3>", unsafe_allow_html=True)
     ema_short = st.number_input("EMA (short)", min_value=2, max_value=50, value=9)
     ema_long = st.number_input("EMA (long)", min_value=5, max_value=200, value=21)
 

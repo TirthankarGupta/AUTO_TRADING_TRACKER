@@ -1,0 +1,47 @@
+AUTO TRADING TRACKER — CHECKPOINT (Sep 13, 2025)
+
+Where we stand today
+--------------------
+- SmartAPI session management working
+  * smartapi_session_manager.py can refresh / prompt login with TOTP.
+  * session.json holds valid tokens.
+- Integration into bot done
+  * trading_bot.py patched → auto-calls ensure_session() at startup.
+  * Sets jwtToken, refreshToken, feedToken automatically.
+  * Smoke test (holding()) works: SUCCESS.
+- Manual trading supported
+  * You can place trades in the Angel One mobile app.
+  * Our app journals them later via API polling.
+- Vision confirmed
+  * Immediate: App shows candlesticks + indicators + journals trades (demo project).
+  * Long-term: Full auto-trading based on your buy signal.
+
+Next session plan (Sep 14, 2025)
+--------------------------------
+1. Add resilient polling loop
+   - Retry on internet outage.
+   - Catch up missed trades by re-syncing orderbook/tradebook.
+2. Extend journaling to CSV (trading_journal_autolog.csv).
+3. Keep candlestick chart + EMA logic in trading_journal.py (showcase visuals).
+4. (Optional, later) Add websocket feed for real-time journaling.
+
+Commands recap
+--------------
+# Activate venv
+cd C:\AUTO_TRADING_TRACKER
+.\venv\Scripts\Activate
+
+# Run bot (journaling + candlesticks placeholder)
+python trading_bot.py
+
+# Run session manager if tokens expired
+python smartapi_session_manager.py
+
+Housekeeping done today
+-----------------------
+- Backed up trading_bot.py and smartapi_session_manager.py.
+- Deactivated venv before shutdown.
+
+Tomorrow
+--------
+Start by re-activating venv, run "python trading_bot.py", and we continue with resilient polling + journaling logic.
