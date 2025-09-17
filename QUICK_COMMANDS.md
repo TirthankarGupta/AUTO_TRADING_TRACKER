@@ -10,9 +10,9 @@ cd C:\AUTO_TRADING_TRACKER
 .\.venv\Scripts\Activate
 ```
 
-## 2. Activate virtual environment
+## 3. Run Streamlit app
 ```powershell
-.\.venv\Scripts\Activate
+.\.venv\Scripts\python -m streamlit run trading_journal.py
 ```
 
 ## 4. Kill Streamlit server on port 8501
